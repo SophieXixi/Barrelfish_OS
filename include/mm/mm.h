@@ -26,6 +26,24 @@
 __BEGIN_DECLS
 
 
+/**
+ * @brief structure of the free list
+ *
+ * @note: Kerwin: I prefer to use the linkled list here.
+ * Reason: easy to coalesce adjacent free blocks later.
+ *       
+ */
+struct free_list {
+    struct mm_node *head;     
+};
+
+// Node in the free list (meta-data)
+struct mm_node {
+    size_t size;                  // Size of the free memory block
+    uintptr_t base_addr;          // Base address of the free memory block
+    struct mm_node *next;         // Pointer to the next node in the free list
+};
+
 
 /// type of the slot allocator refill function
 typedef errval_t (*slot_alloc_refill_fn_t)(struct slot_allocator *ca);
@@ -41,8 +59,14 @@ struct mm {
     slot_alloc_refill_fn_t refill;   ///< Function to refill the slot allocator
     enum objtype           objtype;  ///< Type of capabilities stored
     // TODO: add your own fields here to track the use of memory etc.
-};
+    
+    // Thhis is for the Memory tracking
+    size_t total_memory;             ///< Total memory managed by this instance
+    size_t avaliable_memory;         ///< Free memory currently available
 
+    struct free_list free_list;
+    struct slab_allocator slab_allocator;
+};
 
 
 /**
@@ -59,7 +83,7 @@ struct mm {
  *  - @retval SYS_ERR_OK if the memory manager was successfully initialized
  */
 errval_t mm_init(struct mm *mm, enum objtype objtype, struct slot_allocator *ca,
-                 slot_alloc_refill_fn_t refill, void *slab_buf, size_t slab_sz)
+                 slot_alloc_refill_fn_t refill, void *slabƒr_buf, size_t slab_sz)
     __attribute__((warn_unused_result));
 
 

@@ -19,6 +19,14 @@
 #include <mm/mm.h>
 
 
+// Prototype for free_list_init
+void free_list_init(struct free_list *list);
+
+
+// Initialize the free list that is empty
+void free_list_init(struct free_list *list) {
+    list->head = NULL; 
+}
 
 /**
  * @brief initializes the memory manager instance
@@ -35,21 +43,29 @@
  */
 errval_t mm_init(struct mm *mm, enum objtype objtype, struct slot_allocator *ca,
                  slot_alloc_refill_fn_t refill, void *slab_buf, size_t slab_sz)
-{
-    // make compiler happy about unused parameters
-    (void)mm;
-    (void)objtype;
-    (void)ca;
+{   
     (void)refill;
-    (void)slab_buf;
-    (void)slab_sz;
+     
+    // Parameter: void slab_init(struct slab_allocator *slabs, size_t objectsize, slab_refill_func_t refill_func);
+    slab_init(&mm->slab_allocator, sizeof(struct mm_node), NULL);   //Initializes the slab allocator
 
-    // TODO: initialize the mm instance
+    //Add the initlal buffer containing the memory to grow the slab. 
+    slab_grow(&mm->slab_allocator, slab_buf, slab_sz); 
 
-    UNIMPLEMENTED();
-    return LIB_ERR_NOT_IMPLEMENTED;
+    //Set the slop allocator
+    mm->ca = ca;
+
+    // This is the cap. type the mm will handle
+    mm->objtype = objtype;
+
+    free_list_init(&mm->free_list);  // Initialize the free list
+
+    // Initialize total and free memory tracking
+    mm->total_memory = 0;  // Total memory starts at 0, will be increased as memory is added
+    mm->avaliable_memory = 0;   // No free memory initially, will be updated in mm_add()
+
+    return SYS_ERR_OK;
 }
-
 
 /**
  * @brief destroys an mm instance
@@ -72,6 +88,7 @@ errval_t mm_destroy(struct mm *mm)
     UNIMPLEMENTED();
     return LIB_ERR_NOT_IMPLEMENTED;
 }
+
 
 
 /**
