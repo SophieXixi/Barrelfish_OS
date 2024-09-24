@@ -19,9 +19,9 @@
 #include <mm/mm.h>
 
 
-// Prototype for free_list_init
+// Prototype for functions below
 void free_list_init(struct free_list *list);
-
+errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr);
 
 // Initialize the free list that is empty
 void free_list_init(struct free_list *list) {
@@ -37,6 +37,8 @@ void free_list_init(struct free_list *list) {
  * @param[in] refill    slot allocator refill function to be used
  * @param[in] slab_buf  initial buffer space for slab allocators
  * @param[in] slab_sz   size of the initial slab buffer
+ * Slot allocators: managing free capability slots
+ * Slab allocators: a pool of memory that supports allocation requests of one specific size.
  *
  * @return error value indicating success or failure
  *  - @retval SYS_ERR_OK if the memory manager was successfully initialized
@@ -89,7 +91,73 @@ errval_t mm_destroy(struct mm *mm)
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
+// Used for next fit policy
+static struct mm_node *last_inserted_node = NULL;
 
+// Probably need to be sorted. Srot based on the base address
+errval_t insertNode_free_list(struct mm *mm , struct free_list *list, size_t size, uintptr_t base_addr) {
+    struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
+    if (new_node == NULL) {
+        return MM_ERR_SLAB_ALLOC_FAIL;  
+    }
+
+    new_node->size = size;
+    new_node->base_addr = base_addr;
+    new_node->next = NULL;
+    
+    // If the list is empty, make this the head node
+    if (list->head == NULL) {
+        list->head = new_node;
+        last_inserted_node = new_node;  // Update the next fit pointer
+        return SYS_ERR_OK;
+    }
+
+    struct mm_node *current = last_inserted_node ? last_inserted_node : list->head;
+    struct mm_node *previous = NULL;
+
+    // Search for the insertion point based on base_addr
+    while (current != NULL) {
+        // Check for memory overlap
+        uintptr_t current_base = current->base_addr;
+        size_t current_size = current->size;
+
+        // Check if there is any overlap
+        if ((base_addr >= current_base && base_addr < current_base + current_size) ||
+            (base_addr + size > current_base && base_addr + size <= current_base + current_size)) {
+            return MM_ERR_ALREADY_PRESENT;  // Memory region overlaps
+        }
+
+        previous = current;
+        current = current->next;
+
+        // If we reach the end of the list, wrap around to the start
+        if (current == NULL && previous != list->head) {
+            current = list->head;
+            previous = NULL;
+        }
+
+        // Stop if we reach back to the last inserted node (end of one cycle)
+        if (current == last_inserted_node) {
+            break;
+        }
+    }
+
+    // Insert new_node between previous and current
+    if (previous == NULL) {
+        // Insert at the head
+        new_node->next = list->head;
+        list->head = new_node;
+    } else {
+        // Insert in between
+        new_node->next = current;
+        previous->next = new_node;
+    }
+
+    // Update the last_inserted_node
+    last_inserted_node = new_node;
+
+    return SYS_ERR_OK;
+}
 
 /**
  * @brief adds new memory resources to the memory manager represented by the capability
@@ -112,12 +180,34 @@ errval_t mm_destroy(struct mm *mm)
  */
 errval_t mm_add(struct mm *mm, struct capref cap)
 {
-    // make compiler happy about unused parameters
-    (void)mm;
-    (void)cap;
+    uintptr_t base_addr;
+    size_t size;
 
-    UNIMPLEMENTED();
-    return LIB_ERR_NOT_IMPLEMENTED;
+    struct capability c;
+
+    errval_t err = cap_direct_identify(cap, &c);
+     if (err_is_fail(err)) {
+        return MM_ERR_CAP_INVALID;  // Capability is invalid or could not be identified
+    }
+
+    if (c.type != ObjType_RAM) {
+        return MM_ERR_CAP_TYPE;  // Not a RAM capability
+    }
+
+    // Extract base address and size from the RAM capability represented by capbility
+    base_addr = c.u.ram.base;
+    size = c.u.ram.bytes;
+
+    err = insertNode_free_list(mm, &mm->free_list, size, base_addr);
+    if (err_is_fail(err)) {
+        return MM_ERR_SLAB_ALLOC_FAIL;  // Failed to allocate memory for the new node
+    }
+
+    // Update memory manager tracking
+    mm->total_memory += size;
+    mm->avaliable_memory += size;
+
+    return SYS_ERR_OK;
 }
 
 
@@ -249,11 +339,7 @@ errval_t mm_free(struct mm *mm, struct capref cap)
  */
 size_t mm_mem_available(struct mm *mm)
 {
-    // make compiler happy about unused parameters
-    (void)mm;
-
-    UNIMPLEMENTED();
-    return 0;
+    return mm->avaliable_memory;
 }
 
 
@@ -266,11 +352,7 @@ size_t mm_mem_available(struct mm *mm)
  */
 size_t mm_mem_total(struct mm *mm)
 {
-    // make compiler happy about unused parameters
-    (void)mm;
-
-    UNIMPLEMENTED();
-    return 0;
+    return mm->total_memory;
 }
 
 
