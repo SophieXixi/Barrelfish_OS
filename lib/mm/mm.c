@@ -22,6 +22,8 @@
 // Prototype for functions below
 void free_list_init(struct free_list *list);
 errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr);
+bool is_power_of_two(size_t x);
+
 
 // Initialize the free list that is empty
 void free_list_init(struct free_list *list) {
@@ -47,12 +49,16 @@ errval_t mm_init(struct mm *mm, enum objtype objtype, struct slot_allocator *ca,
                  slot_alloc_refill_fn_t refill, void *slab_buf, size_t slab_sz)
 {   
     (void)refill;
+    (void)slab_buf;
+    (void)slab_sz;
      
+    static char initial_slab_buffer[4096]; // A temporary static buffer
+    
     // Parameter: void slab_init(struct slab_allocator *slabs, size_t objectsize, slab_refill_func_t refill_func);
     slab_init(&mm->slab_allocator, sizeof(struct mm_node), NULL);   //Initializes the slab allocator
 
     //Add the initlal buffer containing the memory to grow the slab. 
-    slab_grow(&mm->slab_allocator, slab_buf, slab_sz); 
+    slab_grow(&mm->slab_allocator, initial_slab_buffer, sizeof(initial_slab_buffer));
 
     //Set the slop allocator
     mm->ca = ca;
@@ -210,13 +216,22 @@ errval_t mm_add(struct mm *mm, struct capref cap)
     return SYS_ERR_OK;
 }
 
+bool is_power_of_two(size_t x) {
+    if (x == 0) return false;
+    while (x % 2 == 0) {
+        x /= 2;
+    }
+    return x == 1;
+}
 
 /**
  * @brief allocates memory with the requested size and alignment
  *
  * @param[in]  mm         memory manager instance to allocate from
  * @param[in]  size       minimum requested size of the memory region to allocate
- * @param[in]  alignment  minimum alignment requirement for the allocation
+ * @param[in]  alignment  minimum alignment requirement for the allocation,  
+                          controls the starting address of the allocated memory
+                          so that the address is divisible by the alignment value.
  * @param[out] retcap     returns the capability to the allocated memory
  *
  * @return error value indicating the success of the operation
@@ -231,18 +246,85 @@ errval_t mm_add(struct mm *mm, struct capref cap)
  * The size of the returned capability is a multiple of BASE_PAGE_SIZE. Alignment requests
  * must be a power of two starting from BASE_PAGE_SIZE.
  *
+ * BASE_PAGE_SIZE = 4kib
  * @note The returned ownership of the capability is transferred to the caller.
  */
 errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct capref *retcap)
-{
-    // make compiler happy about unused parameters
-    (void)mm;
-    (void)alignment;
-    (void)size;
-    (void)retcap;
+{   
 
-    UNIMPLEMENTED();
-    return LIB_ERR_NOT_IMPLEMENTED;
+    //Step 1: Alignment Validation -> Alignment is valid (power of two and greater than or equal to BASE_PAGE_SIZE).
+    if (alignment < BASE_PAGE_SIZE || !is_power_of_two(alignment)) { // Cannot smaller than base page size 
+        return MM_ERR_BAD_ALIGNMENT;
+    }
+
+    // Traverse the free list to find a block that satisfies the alignment and size
+    struct mm_node *current = mm->free_list.head;
+    struct mm_node *previous = NULL;
+    
+    while (current != NULL) {
+        uintptr_t aligned_base = current->base_addr;
+        size_t remaining_size = current->size;
+
+        // Align the base address to the requested alignment
+        if (aligned_base % alignment != 0) {
+            // This rounds up the base address to the next aligned address.
+            aligned_base = (aligned_base + alignment - 1) & ~(alignment - 1); 
+
+            //After aligning the base address, 
+            //the remaining size of the block is adjusted to reflect 
+            //the space consumed by the alignment adjustment.
+            remaining_size = current->size - (aligned_base - current->base_addr);
+        }
+
+        // Check if this block can satisfy the size and alignment requirements
+        if (remaining_size >= size) {
+            // Allocate a new capability slot for the allocated memory
+            errval_t err = slot_alloc(retcap);
+            if (err_is_fail(err)) {
+                return MM_ERR_SLOT_ALLOC_FAIL;
+            }
+
+            // Update the free list: Remove the allocated portion
+            if (aligned_base == current->base_addr) {
+                // Perfect match at the start, reduce the size of the current node
+                current->base_addr += size;
+                current->size -= size;
+                if (current->size == 0) {
+                    // Remove the node if no space remains
+                    if (previous == NULL) {
+                        mm->free_list.head = current->next;
+                    } else {
+                        previous->next = current->next;
+                    }
+                    slab_free(&mm->slab_allocator, current);
+                }
+            } else {
+                // Split the current block and allocate the aligned portion
+                struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
+                if (new_node == NULL) {
+                    return MM_ERR_SLAB_ALLOC_FAIL;
+                }
+                new_node->base_addr = aligned_base + size;
+                new_node->size = remaining_size - size;
+                new_node->next = current->next;
+                current->next = new_node;
+                current->size = aligned_base - current->base_addr;
+            }
+
+            // Update the memory manager's available memory
+            mm->avaliable_memory -= size;
+
+            // Return success
+            return SYS_ERR_OK;
+        }
+
+        // Move to the next node
+        previous = current;
+        current = current->next;
+    }
+
+    // If we ever reach here, there was no block large enough to satisfy the request
+    return MM_ERR_OUT_OF_MEMORY;
 }
 
 
