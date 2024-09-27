@@ -229,18 +229,48 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
  *
  * @return SYS_ERR_OK on sucecss, LIB_ERR_* on failure.
  */
+
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
 {
-    // make compiler happy about unused parameters
-    (void)st;
-    (void)buf;
-    (void)bytes;
-    (void)frame;
-    (void)offset;
-    (void)flags;
+    // Validate input parameters
+    if (!st || !buf) {
+        return ERR_INVALID_ARGS;
+    }
 
-    // TODO(M1):
+    errval_t err;
+
+    // Choose a virtual address to map the frame to
+    lvaddr_t vaddr = st->current_vaddr;
+    st->current_vaddr += bytes;
+
+    // Ensure the size fits in a single L3 page table
+    if (bytes > (512 * BASE_PAGE_SIZE)) {
+        return LIB_ERR_PMAP_ADDR_NOT_FREE;  // Adjust this error as per your definitions
+    }
+
+    // Allocate an L3 page table if necessary
+    struct capref l3_pt_cap;
+    err = pt_alloc(st, ObjType_VNode_AARCH64_l3, &l3_pt_cap);
+    if (err_is_fail(err)) {
+        return LIB_ERR_VNODE_CREATE; // Error creating L3 page table
+    }
+
+    // Calculate the slot index within the L3 page table
+    size_t slot_index = (vaddr >> BASE_PAGE_BITS) & 0x1FF;
+
+    // Attempt to map the frame to the L3 page table at the calculated slot
+    err = vnode_map(l3_pt_cap, frame, slot_index, flags, offset, bytes / BASE_PAGE_SIZE, NULL_CAP);
+    if (err_is_fail(err)) {
+        return LIB_ERR_VNODE_MAP; // Error mapping the frame
+    }
+
+    // Return the mapped virtual address
+    *buf = (void *)vaddr;
+
+    return SYS_ERR_OK;
+
+            // TODO(M1):
     //  - decide on which virtual address to map the frame at
     //  - map the frame assuming all mappings will fit into one leaf page table (L3)  (fail otherwise)
     //  - return the virtual address of the created mapping
@@ -257,8 +287,9 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     // Hint:
     //  - think about what mapping configurations are actually possible
 
-    return LIB_ERR_NOT_IMPLEMENTED;
 }
+
+
 
 /**
  * @brief maps a frame at a user-provided virtual address region
