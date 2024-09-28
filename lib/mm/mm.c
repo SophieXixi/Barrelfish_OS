@@ -21,7 +21,7 @@
 
 // Prototype for functions below
 void free_list_init(struct free_list *list);
-errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr);
+errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap);
 bool is_power_of_two(size_t x);
 
 
@@ -101,7 +101,7 @@ errval_t mm_destroy(struct mm *mm)
 static struct mm_node *last_inserted_node = NULL;
 
 // Probably need to be sorted. Srot based on the base address
-errval_t insertNode_free_list(struct mm *mm , struct free_list *list, size_t size, uintptr_t base_addr) {
+errval_t insertNode_free_list(struct mm *mm , struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap) {
     struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
     if (new_node == NULL) {
         return MM_ERR_SLAB_ALLOC_FAIL;  
@@ -109,6 +109,7 @@ errval_t insertNode_free_list(struct mm *mm , struct free_list *list, size_t siz
 
     new_node->size = size;
     new_node->base_addr = base_addr;
+    new_node -> cap = cap;
     new_node->next = NULL;
     
     // If the list is empty, make this the head node
@@ -204,7 +205,7 @@ errval_t mm_add(struct mm *mm, struct capref cap)
     base_addr = c.u.ram.base;
     size = c.u.ram.bytes;
 
-    err = insertNode_free_list(mm, &mm->free_list, size, base_addr);
+    err = insertNode_free_list(mm, &mm->free_list, size, base_addr,cap);
     if (err_is_fail(err)) {
         return MM_ERR_SLAB_ALLOC_FAIL;  // Failed to allocate memory for the new node
     }
@@ -276,21 +277,32 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
             remaining_size = current->size - (aligned_base - current->base_addr);
         }
 
+        // After we made sure it is aligned
+        
         // Check if this block can satisfy the size and alignment requirements
         if (remaining_size >= size) {
-            // Allocate a new capability slot for the allocated memory
+            // A new capability slot for the newly allocated memory need to be created
+            // Here, if the original cap. is big, we retype() it to make it more suitable?
+
+            //S1: create a new cap.
             errval_t err = slot_alloc(retcap);
+
+            //S2: retype() on the new cap.
+            //cap_retype(struct capref dest_start, struct capref src, gensize_t offset, enum objtype new_type, gensize_t objsize, size_t count)
+           err = cap_retype(*retcap, current->cap, aligned_base - current->base_addr, ObjType_Frame, size);
+
+
             if (err_is_fail(err)) {
-                return MM_ERR_SLOT_ALLOC_FAIL;
+                return MM_ERR_SLOT_ALLOC_FAIL;      
             }
 
-            // Update the free list: Remove the allocated portion
+            // This is a situation of a perfect match means aligned block perfectly matches the size of the request
             if (aligned_base == current->base_addr) {
-                // Perfect match at the start, reduce the size of the current node
                 current->base_addr += size;
                 current->size -= size;
+
+                // if this node is empty,remove it
                 if (current->size == 0) {
-                    // Remove the node if no space remains
                     if (previous == NULL) {
                         mm->free_list.head = current->next;
                     } else {
@@ -298,8 +310,10 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
                     }
                     slab_free(&mm->slab_allocator, current);
                 }
-            } else {
-                // Split the current block and allocate the aligned portion
+
+            // After mm allocates a portion of a large memory block, remaining should be tracked
+            } else { 
+                //void *slab_alloc(struct slab_allocator *slabs)
                 struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
                 if (new_node == NULL) {
                     return MM_ERR_SLAB_ALLOC_FAIL;
@@ -323,7 +337,7 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
         current = current->next;
     }
 
-    // If we ever reach here, there was no block large enough to satisfy the request
+    // If we everreach here, there was no block large enough to satisfy the request
     return MM_ERR_OUT_OF_MEMORY;
 }
 

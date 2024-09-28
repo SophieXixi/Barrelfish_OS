@@ -42,6 +42,7 @@ struct mm_node {
     size_t size;                  // Size of the free memory block
     uintptr_t base_addr;          // Base address of the free memory block
     struct mm_node *next;         // Pointer to the next node in the free list
+    struct capref cap;
 };
 
 

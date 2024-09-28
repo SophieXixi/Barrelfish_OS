@@ -168,5 +168,3 @@ errval_t aos_ram_free(struct capref cap)
 {
     return mm_free(&aos_mm, cap);
 }
-
-
