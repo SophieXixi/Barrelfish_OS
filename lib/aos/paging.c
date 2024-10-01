@@ -22,6 +22,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <grading/io.h>
+#include <grading/state.h>
+#include <grading/options.h>
+#include <grading/tests.h>
+
+
 static struct paging_state current;
 
 
@@ -229,65 +235,66 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
  *
  * @return SYS_ERR_OK on sucecss, LIB_ERR_* on failure.
  */
-
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
 {
+    grading_printf("Before validating input");
+
     // Validate input parameters
-    if (!st || !buf) {
+    if (!st || !buf || bytes == 0) {
         return ERR_INVALID_ARGS;
     }
 
     errval_t err;
 
-    // Choose a virtual address to map the frame to
+    grading_printf("Before allocating VA");
+
+    // Use a linear allocator to choose a virtual address
     lvaddr_t vaddr = st->current_vaddr;
     st->current_vaddr += bytes;
 
-    // Ensure the size fits in a single L3 page table
+    grading_printf("Before validating size");
+
+    // Ensure the size fits in a single L3 page table (512 entries per L3 table, each mapping 4KB)
     if (bytes > (512 * BASE_PAGE_SIZE)) {
-        return LIB_ERR_PMAP_ADDR_NOT_FREE;  // Adjust this error as per your definitions
+        return LIB_ERR_PMAP_ADDR_NOT_FREE;  // Error: cannot map across multiple L3 page tables in M1
     }
 
-    // Allocate an L3 page table if necessary
-    struct capref l3_pt_cap;
-    err = pt_alloc(st, ObjType_VNode_AARCH64_l3, &l3_pt_cap);
+    grading_printf("slot index calc");
+
+    // Calculate the slot index in the L3 page table where this mapping should occur
+    size_t slot_index = (vaddr >> BASE_PAGE_BITS) & 0x1FF;  // L3 page table has 512 entries
+
+    grading_printf("Before VNODE mapping");
+
+    // Use the vnode_map to map the frame into the existing L3 page table
+    // cap_vroot is the root capability, already created by the kernel for the init process
+    err = vnode_map(cap_vroot, frame, slot_index, flags, offset, bytes / BASE_PAGE_SIZE, NULL_CAP);
     if (err_is_fail(err)) {
-        return LIB_ERR_VNODE_CREATE; // Error creating L3 page table
+        grading_printf("vnode_map failed");
+        return err_push(err, LIB_ERR_VNODE_MAP); // Error during the mapping
     }
 
-    // Calculate the slot index within the L3 page table
-    size_t slot_index = (vaddr >> BASE_PAGE_BITS) & 0x1FF;
-
-    // Attempt to map the frame to the L3 page table at the calculated slot
-    err = vnode_map(l3_pt_cap, frame, slot_index, flags, offset, bytes / BASE_PAGE_SIZE, NULL_CAP);
-    if (err_is_fail(err)) {
-        return LIB_ERR_VNODE_MAP; // Error mapping the frame
-    }
+    grading_printf("Success");
 
     // Return the mapped virtual address
     *buf = (void *)vaddr;
 
     return SYS_ERR_OK;
 
-            // TODO(M1):
-    //  - decide on which virtual address to map the frame at
-    //  - map the frame assuming all mappings will fit into one leaf page table (L3)  (fail otherwise)
-    //  - return the virtual address of the created mapping
-    //
-    // Hint:
-    //  - keep it simple: use a linear allocator like st->vaddr_start += ...
-    //
+    // TODO(M1):
+    // - Select a virtual address using a linear allocation scheme (incrementing the current_vaddr).
+    // - Ensure the mapping fits into a single L3 page table (fail otherwise).
+    // - Map the frame capability using vnode_map, and return the virtual address.
+    
     // TODO(M2):
-    // - General case: you will need to handle mappings spanning multiple leaf page tables.
-    // - Find and allocate free region of virtual address space of at least bytes in size.
-    // - Map the user provided frame at the free virtual address
-    // - return the virtual address in the buf parameter
-    //
-    // Hint:
-    //  - think about what mapping configurations are actually possible
-
+    // - General case: handle mappings that span multiple L3 page tables.
+    // - Handle allocation of free regions in the virtual address space that are at least `bytes` in size.
+    // - Map the user-provided frame at the chosen virtual address.
+    // - Return the virtual address in the `buf` parameter.
 }
+
+
 
 
 
