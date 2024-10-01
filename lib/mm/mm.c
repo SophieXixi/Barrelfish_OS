@@ -499,7 +499,7 @@ errval_t mm_free(struct mm *mm, struct capref cap)
     // need to handle partial frees, where a capability was split up by the client
     // and only a part of it was returned.
 
-    uintptr_t base_addr;juiokjlm
+    uintptr_t base_addr;
     size_t size;
 
     struct capability c;
