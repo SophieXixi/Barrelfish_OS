@@ -48,11 +48,12 @@ typedef int paging_flags_t;
 struct paging_state {
     /// slot allocator to be used for this paging state
     struct slot_allocator *slot_alloc;
+    lvaddr_t page_table[1024];
 
     /// virtual address from which to allocate from.
     /// addresses starting from `current_vaddr` are free
     /// TODO(M2): replace me with proper region management
-    lvaddr_t current_vaddr;
+    size_t next_free_viraddr;
 
 };
 
