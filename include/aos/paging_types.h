@@ -54,7 +54,6 @@ struct paging_state {
     /// addresses starting from `current_vaddr` are free
     /// TODO(M2): replace me with proper region management
     size_t next_free_viraddr;
-
 };
 
 

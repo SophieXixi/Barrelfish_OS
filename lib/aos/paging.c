@@ -293,22 +293,40 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     st->next_free_viraddr += bytes;
 
     grading_printf("paging map frame: before validating size\n");
-    size_t alignment;
+    size_t pages;
+    size_t alignment = 1;
 
     // Ensure the size fits in a single L3 page table (512 entries per L3 table, each mapping 4KB)
     if (bytes > (512 * BASE_PAGE_SIZE)) {
         return LIB_ERR_PMAP_ADDR_NOT_FREE;  // Error: cannot map across multiple L3 page tables in M1
     } else if (bytes < BASE_PAGE_SIZE) {
-        alignment = 1;
+        pages = 1;
     } else if (bytes % BASE_PAGE_SIZE == 0) {
-        alignment = bytes / BASE_PAGE_SIZE;
+        pages = bytes / BASE_PAGE_SIZE;
     } else {
-        alignment = bytes / BASE_PAGE_SIZE + 1;
+        pages = bytes / BASE_PAGE_SIZE + 1;
+    }
+    while (pages != 1) {
+        pages = pages / 2;
+        alignment = alignment * 2;
+    }   // 1 -> 1; 2->2; 3->(1,2)->4; 5->(2,2)->(1,4)->8; 7->(3,2)->(1,4)->8
+    if (alignment != 1) {
+        alignment = alignment * 2;
     }
     grading_printf("paging map frame: after set the alignment\n");
+    // printf(st->slot_alloc->alloc);
+    grading_printf("Function address: %p\n", st->slot_alloc[0]);
+
 
     err = paging_alloc(st, buf, bytes, alignment);
-    return err;
+    if (err == SYS_ERR_OK) {
+        err = st->slot_alloc->alloc(st->slot_alloc, &frame);
+    } 
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Allocation failed in paging.");
+        return err;  // Handle the error
+    }
+    return SYS_ERR_OK;
 
     grading_printf("slot index calc");
 
