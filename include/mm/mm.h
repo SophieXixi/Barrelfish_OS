@@ -37,12 +37,17 @@ struct free_list {
     struct mm_node *head;     
 };
 
+struct region_list {
+    struct mm_node *head;     
+};
+
 // Node in the free list (meta-data)
 struct mm_node {
     size_t size;                  // Size of the free memory block
     uintptr_t base_addr;          // Base address of the free memory block
     struct mm_node *next;         // Pointer to the next node in the free list
     struct capref cap;
+    size_t offset;
 };
 
 
@@ -64,7 +69,7 @@ struct mm {
     // Thhis is for the Memory tracking
     size_t total_memory;             ///< Total memory managed by this instance
     size_t avaliable_memory;         ///< Free memory currently available
-
+   
     struct free_list free_list;
     struct slab_allocator slab_allocator;
 };

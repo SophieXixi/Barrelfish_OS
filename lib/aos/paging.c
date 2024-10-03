@@ -47,6 +47,8 @@ static struct paging_state current;
 static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capref *ret)
 {
     errval_t err;
+    grading_printf("pt_alloc: Allocating page table of type %d\n", type);
+
 
     assert(type == ObjType_VNode_AARCH64_l0 || type == ObjType_VNode_AARCH64_l1
            || type == ObjType_VNode_AARCH64_l2 || type == ObjType_VNode_AARCH64_l3);
@@ -54,14 +56,18 @@ static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capr
     // try to get a slot from the slot allocator to hold the new page table
     err = st->slot_alloc->alloc(st->slot_alloc, ret);
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
+        return err_push(err, LIB_ERR_SLOT_ALLOC); 
     }
+
+    grading_printf("pt_alloc: Slot allocated, creating vnode\n");
 
     // create the vnode in the supplied slot
     err = vnode_create(*ret, type);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_VNODE_CREATE);
     }
+
+    grading_printf("pt_alloc: Successfully created page table vnode\n");
 
     return SYS_ERR_OK;
 }
@@ -97,10 +103,12 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 {
     // make compiler happy about unused parameters
     (void)root;
-    (void)ca;
 
     // TODO (M1):
     //  - Implement basic state struct initialization
+    st->current_vaddr = start_vaddr;                
+    st->slot_alloc = ca; 
+
     // TODO (M2):
     //  -  Implement page fault handler that installs frames when a page fault
     //     occurs and keeps track of the virtual address space.
@@ -140,6 +148,7 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
 errval_t paging_init(void)
 {
     // TODO (M1): Call paging_init_state for &current
+
     // TODO (M2): initialize self-paging handler
     // TIP: use thread_set_exception_handler() to setup a page fault handler
     // TIP: Think about the fact that later on, you'll have to make sure that
@@ -238,6 +247,11 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
 {
+    // TODO(M1):
+    // - Select a virtual address using a linear allocation scheme (incrementing the current_vaddr).
+    // - Ensure the mapping fits into a single L3 page table (fail otherwise).
+    // - Map the frame capability using vnode_map, and return the virtual address.
+
     grading_printf("Before validating input");
 
     // Validate input parameters
@@ -281,11 +295,6 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     *buf = (void *)vaddr;
 
     return SYS_ERR_OK;
-
-    // TODO(M1):
-    // - Select a virtual address using a linear allocation scheme (incrementing the current_vaddr).
-    // - Ensure the mapping fits into a single L3 page table (fail otherwise).
-    // - Map the frame capability using vnode_map, and return the virtual address.
     
     // TODO(M2):
     // - General case: handle mappings that span multiple L3 page tables.
