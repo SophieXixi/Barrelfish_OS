@@ -103,32 +103,36 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 {
     errval_t err;
     st->slot_alloc = ca;
-    struct capref l0_pagetable, l1_pagetable, l2_pagetable, l3_pagetable;
+    struct capref l1_pagetable, l2_pagetable, l3_pagetable;
     struct capref mapping_cap;
-    err = pt_alloc(st, ObjType_VNode_AARCH64_l0, &l0_pagetable);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_VNODE_CREATE);
-    }
-    err = vnode_map(root, l0_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_VNODE_MAP);
-    }
+    // err = pt_alloc(st, ObjType_VNode_AARCH64_l0, &l0_pagetable);
+    // if (err_is_fail(err)) {
+    //     return err_push(err, LIB_ERR_VNODE_CREATE);
+    // }
+    // err = vnode_map(root, l0_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
+    // if (err_is_fail(err)) {
+    //     return err_push(err, LIB_ERR_VNODE_MAP);
+    // }
     err = pt_alloc_l1(st, &root);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_VNODE_CREATE);
     }
-    err = vnode_map(l0_pagetable, l1_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
+    grading_printf("paging init state: alloc l1\n");
+    err = vnode_map(root, l1_pagetable, 15, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_VNODE_MAP);
     }
+    grading_printf("paging init state: map l1\n");
     err = pt_alloc_l2(st, &root);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_VNODE_CREATE);
     }
+    grading_printf("paging init state: alloc l2\n");
     err = vnode_map(l1_pagetable, l2_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_VNODE_MAP);
     }
+    grading_printf("paging init state: map l2\n");
     err = pt_alloc_l3(st, &root);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_VNODE_CREATE);
@@ -140,7 +144,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 
     // TODO (M1):
     //  - Implement basic state struct initialization
-    st->current_vaddr = start_vaddr;                
+    st->next_free_viraddr = start_vaddr;                
     st->slot_alloc = ca; 
 
     // TODO (M2):
@@ -182,7 +186,6 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
 errval_t paging_init(void)
 {
     grading_printf("in paging init\n");
-    struct capref cap;
     // TODO (M1): Call paging_init_state for &current
 
     // TODO (M2): initialize self-paging handler
@@ -192,7 +195,7 @@ errval_t paging_init(void)
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
     set_current_paging_state(&current);
-    paging_init_state(&current, 0, cap, get_default_slot_allocator());
+    paging_init_state(&current, 0, cap_vroot, get_default_slot_allocator());
     return SYS_ERR_OK;
 }
 
@@ -320,16 +323,7 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
 {
-<<<<<<< HEAD
-    // TODO(M1):
-    // - Select a virtual address using a linear allocation scheme (incrementing the current_vaddr).
-    // - Ensure the mapping fits into a single L3 page table (fail otherwise).
-    // - Map the frame capability using vnode_map, and return the virtual address.
-
-    grading_printf("Before validating input");
-=======
     grading_printf("paging map frame: before validating input\n");
->>>>>>> 4380ba6d3aece272bcf2bad658bc347bced12bae
 
     // Validate input parameters
     if (!st || !buf || bytes == 0) {
