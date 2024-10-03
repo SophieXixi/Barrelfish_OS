@@ -101,8 +101,42 @@ __attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state *st, str
 errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct capref root,
                            struct slot_allocator *ca)
 {
-    // make compiler happy about unused parameters
-    (void)root;
+    errval_t err;
+    st->slot_alloc = ca;
+    struct capref l0_pagetable, l1_pagetable, l2_pagetable, l3_pagetable;
+    struct capref mapping_cap;
+    err = pt_alloc(st, ObjType_VNode_AARCH64_l0, &l0_pagetable);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_CREATE);
+    }
+    err = vnode_map(root, l0_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_MAP);
+    }
+    err = pt_alloc_l1(st, &root);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_CREATE);
+    }
+    err = vnode_map(l0_pagetable, l1_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_MAP);
+    }
+    err = pt_alloc_l2(st, &root);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_CREATE);
+    }
+    err = vnode_map(l1_pagetable, l2_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_MAP);
+    }
+    err = pt_alloc_l3(st, &root);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_CREATE);
+    }
+    err = vnode_map(l2_pagetable, l3_pagetable, 0, VREGION_FLAGS_READ_WRITE, 0, 1, mapping_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VNODE_MAP);
+    }
 
     // TODO (M1):
     //  - Implement basic state struct initialization
@@ -158,7 +192,7 @@ errval_t paging_init(void)
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
     set_current_paging_state(&current);
-    paging_init_state(&current, 0, cap, current.slot_alloc);
+    paging_init_state(&current, 0, cap, get_default_slot_allocator());
     return SYS_ERR_OK;
 }
 
@@ -333,7 +367,7 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     }
     grading_printf("paging map frame: after set the alignment\n");
     // printf(st->slot_alloc->alloc);
-    grading_printf("Function address: %p\n", st->slot_alloc[0]);
+    grading_printf("Function address: %p\n", st->slot_alloc);
 
 
     err = paging_alloc(st, buf, bytes, alignment);
