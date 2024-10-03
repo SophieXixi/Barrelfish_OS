@@ -112,7 +112,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
     // TODO (M2):
     //  -  Implement page fault handler that installs frames when a page fault
     //     occurs and keeps track of the virtual address space.
-    st->current_vaddr = start_vaddr;
+    st->next_free_viraddr = start_vaddr;
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
@@ -147,6 +147,8 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
  */
 errval_t paging_init(void)
 {
+    grading_printf("in paging init\n");
+    struct capref cap;
     // TODO (M1): Call paging_init_state for &current
 
     // TODO (M2): initialize self-paging handler
@@ -156,6 +158,7 @@ errval_t paging_init(void)
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
     set_current_paging_state(&current);
+    paging_init_state(&current, 0, cap, current.slot_alloc);
     return SYS_ERR_OK;
 }
 
@@ -211,11 +214,46 @@ errval_t paging_init_onthread(struct thread *t)
  */
 errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t alignment)
 {
-    // make compiler happy about unused parameters
-    (void)st;
-    (void)buf;
-    (void)bytes;
-    (void)alignment;
+    grading_printf("paging alloc\n");
+    if (bytes == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0) {
+        return ERR_INVALID_ARGS;
+    }
+
+    bool next_free_addr;
+    size_t size;
+    if (bytes < BASE_PAGE_SIZE) {
+        size = 1;
+    } else if (bytes % BASE_PAGE_SIZE == 0) {
+        size = bytes / BASE_PAGE_SIZE;
+    } else {
+        size = bytes / BASE_PAGE_SIZE + 1;
+    }
+
+    size_t count = 0;
+    size_t track;
+    size_t start_addr = st->next_free_viraddr;
+    if (st->next_free_viraddr % alignment != 0) {
+        next_free_addr = false;
+        track = 1;
+    } else {
+        next_free_addr = true;
+        track = 0;
+    }
+    grading_printf("paging alloc: before while looping \n");
+    while (count < size) {
+        if (st->page_table[start_addr + track] == 0) {    // if the continuous blocks are free
+            count ++;
+        } else {    // some blocks are used, so no enough continuous blocks available, start from beginning
+            count = 0;
+        }
+        track ++;
+    }
+    grading_printf("paging alloc: after while loop\n");
+    if (next_free_addr && count == track) {   // the first available address can be used
+        st->next_free_viraddr = start_addr + count;
+    }
+    *buf = (void*)(start_addr + track - count);
+    return SYS_ERR_OK;
 
     /**
      * TODO(M1):
@@ -225,6 +263,7 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
      *   - Find a region of free virtual address space that is large enough to
      *     accomodate a buffer of size `bytes`.
      */
+    
 
     return LIB_ERR_NOT_IMPLEMENTED;
 }
@@ -247,12 +286,16 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
 {
+<<<<<<< HEAD
     // TODO(M1):
     // - Select a virtual address using a linear allocation scheme (incrementing the current_vaddr).
     // - Ensure the mapping fits into a single L3 page table (fail otherwise).
     // - Map the frame capability using vnode_map, and return the virtual address.
 
     grading_printf("Before validating input");
+=======
+    grading_printf("paging map frame: before validating input\n");
+>>>>>>> 4380ba6d3aece272bcf2bad658bc347bced12bae
 
     // Validate input parameters
     if (!st || !buf || bytes == 0) {
@@ -261,18 +304,47 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
 
     errval_t err;
 
-    grading_printf("Before allocating VA");
+    // grading_printf("Before allocating VA");
 
     // Use a linear allocator to choose a virtual address
-    lvaddr_t vaddr = st->current_vaddr;
-    st->current_vaddr += bytes;
+    lvaddr_t vaddr = st->next_free_viraddr;
+    st->next_free_viraddr += bytes;
 
-    grading_printf("Before validating size");
+    grading_printf("paging map frame: before validating size\n");
+    size_t pages;
+    size_t alignment = 1;
 
     // Ensure the size fits in a single L3 page table (512 entries per L3 table, each mapping 4KB)
     if (bytes > (512 * BASE_PAGE_SIZE)) {
         return LIB_ERR_PMAP_ADDR_NOT_FREE;  // Error: cannot map across multiple L3 page tables in M1
+    } else if (bytes < BASE_PAGE_SIZE) {
+        pages = 1;
+    } else if (bytes % BASE_PAGE_SIZE == 0) {
+        pages = bytes / BASE_PAGE_SIZE;
+    } else {
+        pages = bytes / BASE_PAGE_SIZE + 1;
     }
+    while (pages != 1) {
+        pages = pages / 2;
+        alignment = alignment * 2;
+    }   // 1 -> 1; 2->2; 3->(1,2)->4; 5->(2,2)->(1,4)->8; 7->(3,2)->(1,4)->8
+    if (alignment != 1) {
+        alignment = alignment * 2;
+    }
+    grading_printf("paging map frame: after set the alignment\n");
+    // printf(st->slot_alloc->alloc);
+    grading_printf("Function address: %p\n", st->slot_alloc[0]);
+
+
+    err = paging_alloc(st, buf, bytes, alignment);
+    if (err == SYS_ERR_OK) {
+        err = st->slot_alloc->alloc(st->slot_alloc, &frame);
+    } 
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Allocation failed in paging.");
+        return err;  // Handle the error
+    }
+    return SYS_ERR_OK;
 
     grading_printf("slot index calc");
 

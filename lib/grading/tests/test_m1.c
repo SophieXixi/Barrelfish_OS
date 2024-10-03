@@ -177,8 +177,8 @@ errval_t grading_run_tests_physical_memory(struct mm *mm)
     grading_printf("#################################################\n");
 
     alloc_one(mm);
-    alloc_many(mm);
     alloc_and_map();
+    alloc_many(mm);
     free_one(mm);
 
     grading_printf("#################################################\n");
