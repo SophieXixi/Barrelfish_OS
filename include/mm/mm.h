@@ -72,6 +72,7 @@ struct mm {
    
     struct free_list free_list;
     struct slab_allocator slab_allocator;
+    bool mm_refilling_flag;
 };
 
 
@@ -182,7 +183,7 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 static inline errval_t mm_alloc(struct mm *mm, size_t size, struct capref *retcap)
     __attribute__((warn_unused_result));
 static inline errval_t mm_alloc(struct mm *mm, size_t size, struct capref *retcap)
-{
+{ 
     return mm_alloc_aligned(mm, size, BASE_PAGE_SIZE, retcap);
 }
 

@@ -26,6 +26,7 @@
 #include <aos/caddr.h>
 #include <barrelfish_kpi/paging_arch.h>
 
+
 /**
  * @brief capability invocation
  *
@@ -126,7 +127,20 @@ static inline errval_t invoke_cnode_retype(struct capref root, capaddr_t src_csp
                                            gensize_t offset, enum objtype newtype,
                                            gensize_t objsize, size_t count, capaddr_t to_cspace,
                                            capaddr_t to, enum cnode_type to_level, capaddr_t slot)
-{
+{   
+    // printf("---- invoke_cnode_retype invoked ----\n");
+    // printf("Root CNode: 0x%lx\n", root.cnode);
+    // printf("Source CSpace: 0x%lx\n", src_cspace);
+    // printf("Cap to retype: 0x%lx\n", cap);
+    // printf("Offset: %zu\n", offset);
+    // printf("New type: %d\n", newtype);
+    // printf("Object size: %zu\n", objsize);
+    // printf("Count: %zu\n", count);
+    // printf("To CSpace: 0x%lx\n", to_cspace);
+    // printf("To slot: 0x%lx\n", to);
+    // printf("To level: %d\n", to_level);
+    // printf("Destination slot: 0x%lx\n", slot);
+    
     assert(cap != CPTR_NULL);
 
     assert(newtype < ObjType_Num);

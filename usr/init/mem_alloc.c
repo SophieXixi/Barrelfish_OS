@@ -12,6 +12,7 @@
 #include <mm/mm.h>
 #include <aos/paging.h>
 #include <grading/grading.h>
+#include <grading/io.h>
 
 /// MM allocator instance data
 static struct mm aos_mm;
@@ -28,6 +29,7 @@ static struct slot_prealloc init_slot_alloc;
  */
 static errval_t mm_slot_alloc_refill(struct slot_allocator *ca)
 {
+    printf("Invoke the mm_slot_alloc_refill function\n");
     struct slot_prealloc *this = (struct slot_prealloc *)ca;
     return slot_prealloc_refill(this);
 }
@@ -120,7 +122,10 @@ errval_t initialize_ram_alloc(struct bootinfo *bi)
             if (err_is_fail(err)) {
                 DEBUG_ERR(err, "Warning: adding RAM region %d (%p/%zu) FAILED", i,
                           bi->regions[i].mr_base, bi->regions[i].mr_bytes);
-            }
+            }   
+
+            printf("Successfully added region %zu: base=%p, size=%zu\n", i,
+                           (void *)bi->regions[i].mr_base, bi->regions[i].mr_bytes);
 
             mem_cap.slot++;
         }

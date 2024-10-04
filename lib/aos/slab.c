@@ -17,7 +17,7 @@
 
 #include <aos/aos.h>
 #include <aos/slab.h>
-#include <aos/static_assert.h>
+#include <aos/static_assert.h> 
 
 struct block_head {
     struct block_head *next;///< Pointer to next block in free list
@@ -92,6 +92,7 @@ void *slab_alloc(struct slab_allocator *slabs)
 
     if (sh == NULL) {
         /* out of memory. try refill function if we have one */
+        printf("Slab allocator is out of memory, please refill!\n");
         if (!slabs->refill_func) {
             return NULL;
         } else {
@@ -208,13 +209,31 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref frame_slot,
                                   size_t minbytes)
 {
-    // make compiler happy about unused parameters
-    (void)slabs;
-    (void)frame_slot;
-    (void)minbytes;
+   errval_t err;
+    struct frame_identity fi;
 
-    // TODO: Refill the slot allocator without causing a page-fault
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Retrieve the frame's identity (its size and base address)
+    err = frame_identify(frame_slot, &fi);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_FRAME_IDENTIFY);
+    }
+
+    // Ensure the frame contains at least the required amount of memory
+    if (fi.bytes < minbytes) {
+        return PORT_ERR_NOT_ENOUGH_MEMORY;
+    }
+
+    // Map the frame into virtual memory if not already mapped
+    void *buf;
+    err = paging_map_frame_attr(get_current_paging_state(), &buf, fi.bytes, frame_slot, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_VSPACE_MAP);
+    }
+
+    // Add the memory to the slab allocator using the slab_grow function
+    slab_grow(slabs, buf, fi.bytes);
+
+    return SYS_ERR_OK;
 }
 
 /**
@@ -227,5 +246,6 @@ errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref fr
  */
 errval_t slab_default_refill(struct slab_allocator *slabs)
 {
+    printf("Invoke the slab default refill\n");
     return slab_refill_pages(slabs, BASE_PAGE_SIZE);
 }
