@@ -106,7 +106,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 
     // TODO (M1):
     //  - Implement basic state struct initialization
-    //st->current_vaddr = start_vaddr;                
+    st->current_vaddr = start_vaddr;                
     st->slot_alloc = ca; 
 
     // TODO (M2):
@@ -286,12 +286,6 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
 {
-
-    // TODO(M1):
-    // - Select a virtual address using a linear allocation scheme (incrementing the current_vaddr).
-    // - Ensure the mapping fits into a single L3 page table (fail otherwise).
-    // - Map the frame capability using vnode_map, and return the virtual address.
-
 
     grading_printf("paging map frame: before validating input\n");
 
