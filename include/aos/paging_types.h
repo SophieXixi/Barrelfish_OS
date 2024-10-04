@@ -49,6 +49,7 @@ struct paging_state {
     /// slot allocator to be used for this paging state
     struct slot_allocator *slot_alloc;
     lvaddr_t page_table[1024];
+    struct capref mappings[32];
 
     /// virtual address from which to allocate from.
     /// addresses starting from `current_vaddr` are free
