@@ -371,8 +371,10 @@ static inline errval_t vnode_map(struct capref dest, struct capref src, capaddr_
     capaddr_t       mcn_addr  = get_cnode_addr(mapping);
     capaddr_t       mcn_root  = get_croot_addr(mapping);
 
+    printf("ready to call invoke_vnoce_map\n");
     return invoke_vnode_map(dest, slot, sroot, saddr, slevel, attr, off, pte_count, mcn_root,
                             mcn_addr, mcn_level, mapping.slot);
+    printf("falied to call invoke_vnode_map\n");
 }
 
 static inline errval_t vnode_unmap(struct capref pgtl, struct capref mapping)
