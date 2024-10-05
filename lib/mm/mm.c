@@ -24,11 +24,6 @@
 #include <grading/tests.h>
 #include <grading/grading.h>
 
-// Prototype for functions below
-void free_list_init(struct free_list *list);
-void region_list_init(struct region_list *list);
-errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap);
-bool is_power_of_two(size_t x);
 
 // Initialize the free list that is empty
 void free_list_init(struct free_list *list) {
@@ -38,6 +33,68 @@ void free_list_init(struct free_list *list) {
 void region_list_init(struct region_list *list) {
     list->head = NULL; 
 }
+
+bool is_power_of_two(size_t x) {
+    if (x == 0) return false;
+    while (x % 2 == 0) {
+        x /= 2;
+    }
+    return x == 1;
+}
+
+errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap, genpaddr_t capability_base) {
+    struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
+    if (new_node == NULL) {
+        grading_printf("failed to allocate slab");
+        return MM_ERR_SLAB_ALLOC_FAIL;
+    }
+
+    new_node->size = size;
+    new_node->base_addr = base_addr;
+    new_node->cap = cap;
+    new_node->next = NULL;
+    new_node->prev = NULL; 
+    new_node->used = false;
+    new_node->capability_base = capability_base;
+    new_node->offset = 0;
+
+    // If the list is empty
+    if (list->head == NULL) {
+        list->head = new_node;
+        return SYS_ERR_OK;
+    }
+
+    struct mm_node *current = list->head;
+    struct mm_node *previous = NULL;
+
+    // Traverse the list to find the appropriate insertion point based on base_addr
+    while (current != NULL && current->base_addr < base_addr) {
+        previous = current;
+        current = current->next;
+    }
+
+    // If we are inserting at the beginning of the list
+    if (previous == NULL) {
+        new_node->next = list->head;
+        if (list->head != NULL) {
+            list->head->prev = new_node;  // Set previous of the old head
+        }
+        list->head = new_node;
+    } else {
+        // Insert the new node in between `previous` and `current`
+        previous->next = new_node;
+        new_node->prev = previous;  // Set the previous pointer of the new node
+
+        new_node->next = current;
+        if (current != NULL) {
+            current->prev = new_node;  // Update `prev` pointer of the next node (current)
+        }
+    }
+
+    return SYS_ERR_OK;
+}
+
+
  
 /**
  * @brief initializes the memory manager instance
@@ -65,7 +122,7 @@ errval_t mm_init(struct mm *mm, enum objtype objtype, struct slot_allocator *ca,
     static char initial_slab_buffer[100 * 20480]; // A temporary static buffer
     
     // Parameter: void slab_init(struct slab_allocator *slabs, size_t objectsize, slab_refill_func_t refill_func);
-    slab_init(&mm->slab_allocator, sizeof(struct mm_node), slab_default_refill);   //Initializes the slab allocator
+    slab_init(&mm->slab_allocator, sizeof(struct mm_node), NULL);   //Initializes the slab allocator
 
     //Add the initlal buffer containing the memory to grow the slab. 
     slab_grow(&mm->slab_allocator, initial_slab_buffer, sizeof(initial_slab_buffer));
@@ -119,48 +176,6 @@ errval_t mm_destroy(struct mm *mm)
     return SYS_ERR_OK;
 }
 
-// Probably need to be sorted. Srot based on the base address
-errval_t insertNode_free_list(struct mm *mm , struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap) {
-   struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
-    if (new_node == NULL) {
-        grading_printf("failed to allocate slab");
-        return MM_ERR_SLAB_ALLOC_FAIL;  
-    }
-
-    new_node->size = size;
-    new_node->base_addr = base_addr;
-    new_node->cap = cap;
-    new_node->next = NULL;
-    new_node->offset = 0;
-
-    // if it is a empty list
-    if (list->head == NULL) {
-        list->head = new_node;
-        return SYS_ERR_OK;
-    }
-
-    struct mm_node *current = list->head;
-    struct mm_node *previous = NULL;
-
-    // Traverse the list to find the appropriate insertion point based on base_addr
-    while (current != NULL && current->base_addr < base_addr) {
-        previous = current;
-        current = current->next;
-    }
-
-    // If we are inserting at the beginning of the list
-    if (previous == NULL) {
-        new_node->next = list->head;
-        list->head = new_node;
-    } else {
-        // Insert the new node in between previous and current
-        previous->next = new_node;
-        new_node->next = current;
-    }
-
-    return SYS_ERR_OK;
-}
-
 /**
  * @brief adds new memory resources to the memory manager represented by the capability
  *
@@ -184,15 +199,18 @@ errval_t mm_add(struct mm *mm, struct capref cap)
 {
     uintptr_t base_addr;
     size_t size;
+    genpaddr_t capability_base;
 
     struct capability c;
 
+    // get the cap
     errval_t err = cap_direct_identify(cap, &c);
      if (err_is_fail(err)) {
         grading_printf("cap invalid or undefiƒfned");
         return MM_ERR_CAP_INVALID;  
     }
 
+    // Check the type of cap
     if (c.type != ObjType_RAM) {
         grading_printf("cap RAM is not of the type");
         return MM_ERR_CAP_TYPE;  
@@ -201,9 +219,32 @@ errval_t mm_add(struct mm *mm, struct capref cap)
     // Extract base address and size from the RAM capability represented by capbility
     base_addr = c.u.ram.base;
     size = c.u.ram.bytes;
+    capability_base = c.u.ram.base;
 
-    // Insert for free list
-    err = insertNode_free_list(mm, &(mm->free_list), size, base_addr,cap);
+    // Check if RAM does not exist of or not aligned
+    if (size <= 0 || base_addr % BASE_PAGE_SIZE != 0) {
+        return MM_ERR_CAP_INVALID;
+    }
+
+    // Check if the supplied memory is already managed by this allocator
+    struct mm_node *curr = mm->free_list.head;
+    while (curr != NULL) {
+        struct capability curr_cap;
+        err = cap_direct_identify(curr->cap, &curr_cap);
+        if (err_is_fail(err)){
+            return err_push(err, LIB_ERR_CAP_IDENTIFY);
+        }
+        if (base_addr == size) {
+            return MM_ERR_ALREADY_PRESENT;
+        }
+        curr = curr->next;
+    }
+
+    // Check the free objects in the slab allocator and refill accordingly
+    slab_refill_check(&(mm->slab_allocator));
+
+    // Creating the freelist using mm node
+    err = insertNode_free_list(mm, &(mm->free_list), size, base_addr,cap,capability_base);
     if (err_is_fail(err)) {
         grading_printf("fauled to allocate memory");
         return MM_ERR_SLAB_ALLOC_FAIL;
@@ -221,14 +262,79 @@ errval_t mm_add(struct mm *mm, struct capref cap)
     return SYS_ERR_OK;
 }
 
-bool is_power_of_two(size_t x) {
-    if (x == 0) return false;
-    while (x % 2 == 0) {
-        x /= 2;
+/**
+ * @brief splits a node into two, creating a new node before the current node
+ *
+ * @param[in]  mm         memory manager instance to allocate from
+ * @param[in]  node       the node to split on
+ * @param[in]  size       the size to split off
+ * @param[in]  used       whether to mark the node as used or free
+ *
+ * @return error value indicating the success of the operation
+ *  - @retval SYS_ERR_OK                on success
+ *  - @retval MM_ERR_SLAB_ALLOC_FAIL    failed to allocate memory for meta data
+ */
+static errval_t mm_split_beginning(struct mm *mm, struct mm_node *node, size_t size, bool used) {
+    // allocate space for the new node and set the fields
+    slab_refill_check(&(mm->slab_allocator));
+    struct mm_node *splitoff = slab_alloc(&mm->slab_allocator);
+    if (splitoff == NULL) {
+        return MM_ERR_SLAB_ALLOC_FAIL;
     }
-    return x == 1;
+
+    // set the new node's fields
+    splitoff->base_addr = node->base_addr;
+    splitoff->size = size;
+    splitoff->used = used;
+    splitoff->prev = node->prev;
+    splitoff->next = node;
+    splitoff->cap = node->cap;
+
+    if (node->prev == NULL) {
+        mm->free_list.head = splitoff;
+    } else {
+        node->prev->next = splitoff;
+    }
+    node->base_addr += size;
+    node->size -= size;
+    node->prev = splitoff;
+
+    return SYS_ERR_OK;
 }
 
+/**
+ * @brief splits a node in two, creating a new node after the current node
+ *
+ * @param[in]  mm         memory manager instance to allocate from
+ * @param[in]  node       the node to split on
+ * @param[in]  size       the size after which to make the split
+ * @param[in]  used       whether to mark the node as used or free
+ *
+ * @return error value indicating the success of the operation
+ *  - @retval SYS_ERR_OK                on success
+ *  - @retval MM_ERR_SLAB_ALLOC_FAIL    failed to allocate memory for meta data
+ */
+static errval_t mm_split_end(struct mm *mm, struct mm_node *node, size_t size, bool used) {
+    // allocate space for the new node and set the fields
+    slab_refill_check(&(mm->slab_allocator));
+    struct mm_node *splitoff = slab_alloc(&mm->slab_allocator);
+    if (splitoff == NULL) {
+        return MM_ERR_SLAB_ALLOC_FAIL;
+    }
+
+    // set the new node's fields
+    splitoff->base_addr = node->base_addr + size;
+    splitoff->size = node->size - size;
+    splitoff->used = used;
+    splitoff->prev = node;
+    splitoff->next = node->next;
+    splitoff->cap = node->cap;
+    
+    node->size = size;
+    node->next = splitoff;
+
+    return SYS_ERR_OK;
+}
 
 /**
  * @brief allocates memory with the requested size and alignment
@@ -259,90 +365,85 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
     printf("Calling mm_alloc_aligned\n");   
     printf("Before allocation - nslots: %u, space: %u\n", mm->ca->nslots, mm->ca->space);
 
-
-    // Alignment Validation
-    if (alignment < BASE_PAGE_SIZE || !is_power_of_two(alignment)) {
+    // Alignment Validation 
+    if (alignment < BASE_PAGE_SIZE || !is_power_of_two(alignment) || (alignment & (alignment - 1)) != 0) {
+        printf("Bad alognment in the mm_alloc_aligned\n");
         return MM_ERR_BAD_ALIGNMENT;
+    } else if (mm->avaliable_memory < BASE_PAGE_SIZE) { // check avaliable memory
+        return MM_ERR_OUT_OF_MEMORY;
     }
-    
-    // Check if the refill condition met
-    if (mm->ca->space < 10 && mm -> mm_refilling_flag == false) {
-        mm -> mm_refilling_flag = true;
-        errval_t err = mm->refill(mm->ca);
-        if (err_is_fail(err)) {  
-            mm->mm_refilling_flag = false;   
-            return MM_ERR_SLOT_ALLOC_FAIL;
-        }
-        mm->mm_refilling_flag = false;
-    } else {
-        struct mm_node *current = mm->free_list.head;
-        struct mm_node *previous = NULL;
-        size_t portionNum = 0;  //For debug purpose
+
+    size_t aligned_size = ROUND_UP(size, BASE_PAGE_SIZE);
+
+    // Check the free objects in the slab allocator and refill accordingly
+    slab_refill_check(&(mm->slab_allocator));
+
+    struct mm_node *current = mm->free_list.head;
     
     while (current != NULL) {
         uintptr_t current_base = current->base_addr;
         size_t current_size = current->size;
-        
-        if (current_size >= size) {
-            uintptr_t aligned_base = (current_base + alignment - 1) & ~(alignment - 1);
-            size_t remaining_size = current_base + current_size - aligned_base;
 
-            if (remaining_size >= size) {
-                // Create a new cap
-                errval_t err = mm->ca->alloc(mm->ca, retcap);
-                if (err_is_fail(err)) {
-                    printf("Warning!!!!!, We cannot create a new cap because we run out of slots\n");
-                    return MM_ERR_SLOT_ALLOC_FAIL;
-                }
+        size_t alignment_offset = alignment - (current_base % alignment);
 
-                // split use retype
-                errval_t err_2 = cap_retype(*retcap, current->cap, aligned_base - current_base, ObjType_RAM, size);
-                if (err_is_fail(err_2)) {
-                    return MM_ERR_SLOT_ALLOC_FAIL;
-                }
-                
-                printf("Retyped successfully in the mm_alloc_aligned\n");
-                // Update the size of current node
-                current->size = aligned_base - current_base;
-
-                // Create a new node for the allocated memory
-                struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
-                if (new_node == NULL) {
-                    return MM_ERR_SLAB_ALLOC_FAIL;
-                }
-                new_node->offset = aligned_base - current_base;
-                new_node->size = size;
-                new_node->base_addr = aligned_base;
-                new_node->cap = *retcap;
-                new_node->next = current->next;
-
-                // Create a reaming node for what is left
-                if (remaining_size > size) {
-                    struct mm_node *remaining_node = slab_alloc(&mm->slab_allocator);
-                    if (remaining_node == NULL) {
-                        return MM_ERR_SLAB_ALLOC_FAIL;
-                    }
-                    remaining_node->base_addr = aligned_base + size;
-                    remaining_node->size = remaining_size - size;
-                    remaining_node->next = new_node->next;
-                    remaining_node->cap = current -> cap;
-                    remaining_node -> offset = aligned_base - current_base + size;
-                    new_node->next = remaining_node;
-                }
-
-                current->next = new_node;
-                mm->avaliable_memory -= size;
-
-                return SYS_ERR_OK;
-            }
+        if (alignment_offset == alignment) {
+            alignment_offset = 0;
+        } else if (alignment_offset >= current->size) {
+            continue;
         }
 
-        previous = current;
+        size_t potential_size = current_size - alignment_offset;
+        if (current->used == false && potential_size >= aligned_size && potential_size >= BASE_PAGE_SIZE) {
+            // split a node if there is enough space but the alignment is not correct
+            if (alignment_offset > 0) {
+                errval_t err = mm_split_beginning(mm, current, alignment_offset, false);
+                if (err_is_fail(err)) {
+                    return err;
+                }
+            }
+
+            // split off the remainder of the node if possible
+            if (current_size > aligned_size) {
+                errval_t err = mm_split_end(mm, current, aligned_size, false);
+                if (err_is_fail(err)) {
+                    return err;
+                }
+            }
+
+             // mark current mm ndoe as used
+            current->used = true;
+
+             // allocate a new slot for the return capability
+            struct slot_prealloc *ca = (struct slot_prealloc *)mm->ca;
+            errval_t err = slot_prealloc_alloc(ca, retcap);
+            if (err_is_fail(err)) {
+                return MM_ERR_SLOT_ALLOC_FAIL;
+            }
+
+            // copy the original capability into the new slot
+            gensize_t aligned_offset = current->base_addr - current->capability_base;
+            if (aligned_offset % alignment != 0) {
+                aligned_offset = aligned_offset + alignment - (aligned_offset % alignment);
+            }
+
+            err = cap_retype(*retcap, current->cap, aligned_offset, ObjType_RAM, aligned_size);
+            if (err_is_fail(err)) {
+                debug_printf("retype error: size %d aligned size %d offset %p\n", size, aligned_size, aligned_offset);
+                debug_printf(err_getstring(err));
+                return MM_ERR_ALLOC_CONSTRAINTS;
+            }
+
+            err = slot_prealloc_refill(ca);
+            if (err_is_fail(err)) {
+                return MM_ERR_ALLOC_CONSTRAINTS;
+            }
+            return SYS_ERR_OK;
+
+        }
         current = current->next;
-        portionNum++;
-    }
     }
 
+    // no suitable block was found
     return MM_ERR_OUT_OF_MEMORY;
 }
 
@@ -374,90 +475,93 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, size_t size,
                                      size_t alignment, struct capref *retcap)
 {
-    // Step 1: Alignment validation
-    if (alignment < BASE_PAGE_SIZE || !is_power_of_two(alignment)) {
+     printf("Calling mm_alloc_aligned\n");   
+    printf("Before allocation - nslots: %u, space: %u\n", mm->ca->nslots, mm->ca->space);
+
+    // Alignment Validation 
+    if (alignment < BASE_PAGE_SIZE || !is_power_of_two(alignment) || (alignment & (alignment - 1)) != 0) {
+        printf("Bad alognment in the mm_alloc_aligned\n");
         return MM_ERR_BAD_ALIGNMENT;
+    } else if (mm->avaliable_memory < BASE_PAGE_SIZE) { // check avaliable memory
+        return MM_ERR_OUT_OF_MEMORY;
     }
 
-    struct mm_node *current = mm->free_list.head;
-    struct mm_node *previous = NULL;
-    size_t portionNum = 0;
+    size_t aligned_size = ROUND_UP(size, BASE_PAGE_SIZE);
 
-    // Step 2: Traverse the free list to find a block that fits within the base-limit range
+    // Check the free objects in the slab allocator and refill accordingly
+    slab_refill_check(&(mm->slab_allocator));
+
+    struct mm_node *current = mm->free_list.head;
+    
     while (current != NULL) {
         uintptr_t current_base = current->base_addr;
         size_t current_size = current->size;
 
-        // Check if current block fits within the base-limit range
-        if (current_base >= base && current_base + current_size <= limit) {
+        size_t alignment_offset = alignment - (current_base % alignment);
 
-            // Align the current base address
-            uintptr_t aligned_base = (current_base + alignment - 1) & ~(alignment - 1);
-            
-            // Check if aligned base and size fits within the limit
-            if (aligned_base >= base && aligned_base + size <= limit) {
-                
-                // Ensure that the remaining size after alignment is sufficient for the request
-                size_t remaining_size = current_base + current_size - aligned_base;
-                if (remaining_size >= size) {
-
-                    // Allocate a new slot for the capability
-                    errval_t err = slot_alloc(retcap);
-                    if (err_is_fail(err)) {
-                        return MM_ERR_SLOT_ALLOC_FAIL;
-                    }
-
-                    // Retype the capability for the aligned memory block
-                    err = cap_retype(*retcap, current->cap, aligned_base - current_base, ObjType_RAM, size);
-                    if (err_is_fail(err)) {
-                        return MM_ERR_SLOT_ALLOC_FAIL;
-                    }
-
-                    // Update the current node to account for the memory allocated
-                    current->size = aligned_base - current_base;
-
-                    // Allocate a new node for the allocated memory block
-                    struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
-                    if (new_node == NULL) {
-                        return MM_ERR_SLAB_ALLOC_FAIL;
-                    }
-
-                    new_node->size = size;
-                    new_node->base_addr = aligned_base;
-                    new_node->cap = *retcap;
-                    new_node->next = current->next;
-
-                    // Handle the remaining memory after the allocated block
-                    if (remaining_size > size) {
-                        struct mm_node *remaining_node = slab_alloc(&mm->slab_allocator);
-                        if (remaining_node == NULL) {
-                            return MM_ERR_SLAB_ALLOC_FAIL;
-                        }
-                        remaining_node->base_addr = aligned_base + size;
-                        remaining_node->size = remaining_size - size;
-                        remaining_node->next = new_node->next;
-
-                        new_node->next = remaining_node;
-                    }
-
-                    // Link the new node into the list
-                    current->next = new_node;
-
-                    // Update memory manager's available memory
-                    mm->avaliable_memory -= size;
-
-                    return SYS_ERR_OK;
-                }
-            }
+        if (alignment_offset == alignment) {
+            alignment_offset = 0;
+        } else if (alignment_offset >= current->size) {
+            continue;
         }
 
-        // Move to the next node in the free list
-        previous = current;
+        // skip this node if it is not within bounds
+        if (current_size < base || current_base + current_size > limit) {
+            continue;
+        }
+
+        size_t potential_size = current_size - alignment_offset;
+        if (current->used == false && potential_size >= aligned_size && potential_size >= BASE_PAGE_SIZE) {
+            // split a node if there is enough space but the alignment is not correct
+            if (alignment_offset > 0) {
+                errval_t err = mm_split_beginning(mm, current, alignment_offset, false);
+                if (err_is_fail(err)) {
+                    return err;
+                }
+            }
+
+            // split off the remainder of the node if possible
+            if (current_size > aligned_size) {
+                errval_t err = mm_split_end(mm, current, aligned_size, false);
+                if (err_is_fail(err)) {
+                    return err;
+                }
+            }
+
+             // mark current mm ndoe as used
+            current->used = true;
+
+             // allocate a new slot for the return capability
+            struct slot_prealloc *ca = (struct slot_prealloc *)mm->ca;
+            errval_t err = slot_prealloc_alloc(ca, retcap);
+            if (err_is_fail(err)) {
+                return MM_ERR_SLOT_ALLOC_FAIL;
+            }
+
+            // copy the original capability into the new slot
+            gensize_t aligned_offset = current->base_addr - current->capability_base;
+            if (aligned_offset % alignment != 0) {
+                aligned_offset = aligned_offset + alignment - (aligned_offset % alignment);
+            }
+
+            err = cap_retype(*retcap, current->cap, aligned_offset, ObjType_RAM, aligned_size);
+            if (err_is_fail(err)) {
+                debug_printf("retype error: size %d aligned size %d offset %p\n", size, aligned_size, aligned_offset);
+                debug_printf(err_getstring(err));
+                return MM_ERR_ALLOC_CONSTRAINTS;
+            }
+
+            err = slot_prealloc_refill(ca);
+            if (err_is_fail(err)) {
+                return MM_ERR_ALLOC_CONSTRAINTS;
+            }
+            return SYS_ERR_OK;
+
+        }
         current = current->next;
-        portionNum++;
     }
 
-    // If no suitable block is found
+    // no suitable block was found
     return MM_ERR_OUT_OF_MEMORY;
 }
 

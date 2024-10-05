@@ -59,7 +59,7 @@ static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capr
         return err_push(err, LIB_ERR_SLOT_ALLOC); 
     }
 
-    grading_printf("pt_alloc: Slot allocated, creating vnode\n");
+    printf("pt_alloc: Slot allocated, creating vnode\n");
 
     // create the vnode in the supplied slot
     err = vnode_create(*ret, type);
@@ -67,7 +67,7 @@ static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capr
         return err_push(err, LIB_ERR_VNODE_CREATE);
     }
 
-    grading_printf("pt_alloc: Successfully created page table vnode\n");
+    printf("pt_alloc: Successfully created page table vnode\n");
 
     return SYS_ERR_OK;
 }
@@ -106,13 +106,16 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 
     // TODO (M1):
     //  - Implement basic state struct initialization
-    st->current_vaddr = start_vaddr;                
-    st->slot_alloc = ca; 
+     
 
     // TODO (M2):
     //  -  Implement page fault handler that installs frames when a page fault
-    //     occurs and keeps track of the virtual address space.
-    st->next_free_viraddr = start_vaddr;
+    //     occurs and keeps track of the virtual address space
+    
+    
+    st->current_vaddr = start_vaddr;      
+    st->start_vaddr = start_vaddr;          
+    st->slot_alloc = ca;
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
@@ -147,7 +150,7 @@ errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr
  */
 errval_t paging_init(void)
 {
-    grading_printf("in paging init\n");
+    printf("Invoke the function paging_init\n");
     struct capref cap;
     // TODO (M1): Call paging_init_state for &current
 
@@ -157,6 +160,7 @@ errval_t paging_init(void)
     // you can handle page faults in any thread of a domain.
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
+    
     set_current_paging_state(&current);
     paging_init_state(&current, 0, cap, current.slot_alloc);
     return SYS_ERR_OK;

@@ -46,8 +46,11 @@ struct mm_node {
     size_t size;                  // Size of the free memory block
     uintptr_t base_addr;          // Base address of the free memory block
     struct mm_node *next;         // Pointer to the next node in the free list
+    struct mm_node *prev;          // Pointer to the prev node in the free list
+    bool used;                   // whether or not this data is in use
     struct capref cap;
     size_t offset;
+    genpaddr_t capability_base;
 };
 
 
@@ -66,7 +69,7 @@ struct mm {
     enum objtype           objtype;  ///< Type of capabilities stored
     // TODO: add your own fields here to track the use of memory etc.
     
-    // Thhis is for the Memory tracking
+    // This is for the Memory tracking
     size_t total_memory;             ///< Total memory managed by this instance
     size_t avaliable_memory;         ///< Free memory currently available
    
@@ -308,6 +311,13 @@ size_t mm_mem_total(struct mm *mm);
  *       a region than is free, and likewise the highest address
  */
 void mm_mem_get_free_range(struct mm *mm, lpaddr_t *base, lpaddr_t *limit);
+
+
+// Prototype for functions below
+void free_list_init(struct free_list *list);
+void region_list_init(struct region_list *list);
+errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap, genpaddr_t capability_base);
+bool is_power_of_two(size_t x);
 
 __END_DECLS
 

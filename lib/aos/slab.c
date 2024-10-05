@@ -209,7 +209,7 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref frame_slot,
                                   size_t minbytes)
 {
-   errval_t err;
+    errval_t err;
     struct frame_identity fi;
 
     // Retrieve the frame's identity (its size and base address)
@@ -246,6 +246,19 @@ errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref fr
  */
 errval_t slab_default_refill(struct slab_allocator *slabs)
 {
-    printf("Invoke the slab default refill\n");
+    printf("Invoke the slab_default_refill function\n");
     return slab_refill_pages(slabs, BASE_PAGE_SIZE);
+}
+
+
+// Check the free objects in the slab allocator and refill
+errval_t slab_refill_check(struct slab_allocator *slabs) {
+    printf("Invoke the slab_refill_check function\n");
+    errval_t err = SYS_ERR_OK;
+    if (slab_freecount(slabs) < 64 && !slabs->slab_refilling) { 
+        slabs->slab_refilling = true;
+        err = slab_default_refill(slabs);
+        slabs->slab_refilling = false;
+    }
+    return err;
 }

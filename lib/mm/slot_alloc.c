@@ -128,7 +128,7 @@ errval_t slot_prealloc_refill(struct slot_prealloc *this)
 out:
     /* free the allocated RAM cap if there was an error and we have allocated a ramcap */
     if (err_is_fail(err) && !capref_is_null(ram_cap)) {
-        err = mm_free(this->mm, ram_cap);
+        err = mm_free(this->mm, ram_cap);   
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "mm_free failed");
         }
