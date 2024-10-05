@@ -42,22 +42,25 @@
 typedef int paging_flags_t;
 
 
-
-
 /// struct to store the paging state of a process' virtual address space.
 struct paging_state {
     /// slot allocator to be used for this paging state
     struct slot_allocator *slot_alloc;
-    lvaddr_t page_table[1024];
-    lvaddr_t current_vaddr;
-    lvaddr_t start_vaddr;
-    
-    struct slab_allocator slab_allocator;
+    lvaddr_t page_table[32];
+    struct capref mappings[32];
+    size_t map_count;
+    /// addresses starting from `current_vaddr` are free
+    size_t curr_addr;
+    struct capref l1_pagetable;
+    size_t l1_slot;
+    struct capref l2_pagetable;
+    size_t l2_slot;
+    struct capref l3_pagetable;
+    size_t l3_slot;
+
 
     /// virtual address from which to allocate from.
-    /// addresses starting from `current_vaddr` are free
     /// TODO(M2): replace me with proper region management
-  
 };
 
 
