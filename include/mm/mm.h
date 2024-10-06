@@ -50,7 +50,7 @@ struct mm_node {
     bool used;                   // whether or not this data is in use
     struct capref cap;
     size_t offset;
-    genpaddr_t capability_base;
+    uintptr_t capability_base;
 };
 
 

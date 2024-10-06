@@ -42,7 +42,7 @@ bool is_power_of_two(size_t x) {
     return x == 1;
 }
 
-errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap, genpaddr_t capability_base) {
+errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap, uintptr_t capability_base) {
     struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
     if (new_node == NULL) {
         grading_printf("failed to allocate slab");
@@ -199,7 +199,7 @@ errval_t mm_add(struct mm *mm, struct capref cap)
 {
     uintptr_t base_addr;
     size_t size;
-    genpaddr_t capability_base;
+    uintptr_t capability_base;
 
     struct capability c;
 
@@ -289,6 +289,8 @@ static errval_t mm_split_beginning(struct mm *mm, struct mm_node *node, size_t s
     splitoff->prev = node->prev;
     splitoff->next = node;
     splitoff->cap = node->cap;
+    splitoff->capability_base = node->capability_base;
+
 
     if (node->prev == NULL) {
         mm->free_list.head = splitoff;
@@ -329,6 +331,7 @@ static errval_t mm_split_end(struct mm *mm, struct mm_node *node, size_t size, b
     splitoff->prev = node;
     splitoff->next = node->next;
     splitoff->cap = node->cap;
+    splitoff->capability_base = node->capability_base;
     
     node->size = size;
     node->next = splitoff;
@@ -421,7 +424,10 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
             }
 
             // copy the original capability into the new slot
-            gensize_t aligned_offset = current->base_addr - current->capability_base;
+            uintptr_t aligned_offset = current->base_addr - current->capability_base;
+            debug_printf("aligned_offset:%p\n", aligned_offset);
+            debug_printf("curren->base_addr:%p\n", current->base_addr);
+            debug_printf("current->capability_base:%p\n", current->capability_base);
             if (aligned_offset % alignment != 0) {
                 aligned_offset = aligned_offset + alignment - (aligned_offset % alignment);
             }
@@ -432,6 +438,8 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
                 debug_printf(err_getstring(err));
                 return MM_ERR_ALLOC_CONSTRAINTS;
             }
+            current->cap = *retcap;
+
 
             err = slot_prealloc_refill(ca);
             if (err_is_fail(err)) {
@@ -555,6 +563,7 @@ errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, s
             if (err_is_fail(err)) {
                 return MM_ERR_ALLOC_CONSTRAINTS;
             }
+
             return SYS_ERR_OK;
 
         }
@@ -591,10 +600,6 @@ errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, s
  */
 errval_t mm_free(struct mm *mm, struct capref cap)
 {
-     // make compiler happy about unused parameters
-    (void)mm;
-    (void)cap;
-
     // TODO:
     //   - add the memory back to the allocator by markint the region as free
     //
@@ -603,8 +608,79 @@ errval_t mm_free(struct mm *mm, struct capref cap)
     // need to handle partial frees, where a capability was split up by the client
     // and only a part of it was returned.
 
-    UNIMPLEMENTED();
-    return LIB_ERR_NOT_IMPLEMENTED;
+    struct capability c;
+    errval_t err = cap_direct_identify(cap, &c);
+    if (err_is_fail(err)) {
+        grading_printf("cap invalid or undefined");
+        return MM_ERR_CAP_INVALID; 
+    }
+
+    if (c.type != ObjType_RAM) {
+        return MM_ERR_CAP_TYPE;
+    }
+
+    // get the base address and size of memory region of which is going to be free
+    //uintptr_t free_base = c.u.ram.base;
+    //size_t free_size = c.u.ram.bytes;
+
+    // traverse the free-list to find the allocated node that includes the region
+    struct mm_node *current = mm->free_list.head;
+    //bool found = false;
+
+    for (current = mm->free_list.head; current != NULL; current = current->next) {
+        if (c.u.ram.base >= current->base_addr && c.u.ram.base + c.u.ram.bytes <= current->base_addr + current->size) {
+            break;
+        }
+    }
+
+
+    debug_printf("to free node: size %d base_adddr %p\n", c.u.ram.bytes, c.u.ram.base);
+    
+    debug_printf("found node: size %d base_addr %p\n", current->size, current->base_addr);
+
+    debug_printf("found node used or not: %d\n", current->used);
+
+    if (current == NULL) {
+        return MM_ERR_NOT_FOUND;
+    } else if (current != NULL && !current->used) {
+        return MM_ERR_DOUBLE_FREE;
+    }
+
+    // free the allocated memory
+    current->used = false;
+    err = cap_destroy(current->cap);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // The next node coalesce ti this if the next node is free, next to it, and has same parent cap
+    if(current->next != NULL && 
+    current->capability_base == current->next->capability_base &&
+    !current->next->used) {
+        struct mm_node *current_next = current->next;
+        current->size += current_next->size;
+        current->next = current_next->next;
+        if(current_next->next != NULL) {
+            current_next->next->prev = current;
+        } 
+
+        slab_free(&mm->slab_allocator, current_next);
+    }
+
+    // coalesce with the prior node if the prior node is free, next to it, and has same parent cap
+    if (current->prev != NULL &&
+    current->prev->capability_base == current->capability_base &&
+      !current->prev->used) {
+        current->prev->size += current->size;
+        current->prev->next = current->next;
+        if (current->next != NULL) {
+            current->next->prev = current->prev;
+        }
+        slab_free(&mm->slab_allocator, current);
+    }
+
+    return SYS_ERR_OK;
+
 }
 
 
