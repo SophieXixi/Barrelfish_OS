@@ -30,10 +30,7 @@ void free_list_init(struct free_list *list) {
     list->head = NULL; 
 }
 
-void region_list_init(struct region_list *list) {
-    list->head = NULL; 
-}
-
+// A help function called in mm_alloc_aligned to check condition
 bool is_power_of_two(size_t x) {
     if (x == 0) return false;
     while (x % 2 == 0) {
@@ -42,13 +39,16 @@ bool is_power_of_two(size_t x) {
     return x == 1;
 }
 
+// A help function will be called in the mm_add that insert the mm_node to our double linked list 
 errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap, uintptr_t capability_base) {
+    // Create a new node use the slab allocation in our mm
     struct mm_node *new_node = slab_alloc(&mm->slab_allocator);
     if (new_node == NULL) {
         grading_printf("failed to allocate slab");
         return MM_ERR_SLAB_ALLOC_FAIL;
     }
 
+    // Initializes new Node with the provided parameters
     new_node->size = size;
     new_node->base_addr = base_addr;
     new_node->cap = cap;
@@ -77,13 +77,13 @@ errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size
     if (previous == NULL) {
         new_node->next = list->head;
         if (list->head != NULL) {
-            list->head->prev = new_node;  // Set previous of the old head
+            list->head->prev = new_node; 
         }
         list->head = new_node;
     } else {
         // Insert the new node in between `previous` and `current`
         previous->next = new_node;
-        new_node->prev = previous;  // Set the previous pointer of the new node
+        new_node->prev = previous;  
 
         new_node->next = current;
         if (current != NULL) {
@@ -117,7 +117,7 @@ errval_t mm_init(struct mm *mm, enum objtype objtype, struct slot_allocator *ca,
     (void)slab_buf;
     (void)slab_sz;
     
-    grading_printf("entering mm_init");
+    printf("entering mm_init");
      
     static char initial_slab_buffer[100 * 20480]; // A temporary static buffer
     
@@ -203,20 +203,20 @@ errval_t mm_add(struct mm *mm, struct capref cap)
 
     struct capability c;
 
-    // get the cap
+    // Obtain the address and size of the memory region the capability refers to
     errval_t err = cap_direct_identify(cap, &c);
      if (err_is_fail(err)) {
-        grading_printf("cap invalid or undefiƒfned");
+        printf("cap invalid or undefiƒfned");
         return MM_ERR_CAP_INVALID;  
     }
 
     // Check the type of cap
     if (c.type != ObjType_RAM) {
-        grading_printf("cap RAM is not of the type");
+        printf("cap RAM is not of the type");
         return MM_ERR_CAP_TYPE;  
     }
 
-    // Extract base address and size from the RAM capability represented by capbility
+    // Extract base address and size from the RAM capability
     base_addr = c.u.ram.base;
     size = c.u.ram.bytes;
     capability_base = c.u.ram.base;
@@ -226,7 +226,7 @@ errval_t mm_add(struct mm *mm, struct capref cap)
         return MM_ERR_CAP_INVALID;
     }
 
-    // Check if the supplied memory is already managed by this allocator
+    // For each node in the list, Check if the supplied memory is already managed by this allocator
     struct mm_node *curr = mm->free_list.head;
     while (curr != NULL) {
         struct capability curr_cap;
@@ -234,7 +234,7 @@ errval_t mm_add(struct mm *mm, struct capref cap)
         if (err_is_fail(err)){
             return err_push(err, LIB_ERR_CAP_IDENTIFY);
         }
-        if (base_addr == size) {
+        if (base_addr == curr_cap.u.ram.base) {
             return MM_ERR_ALREADY_PRESENT;
         }
         curr = curr->next;
@@ -243,7 +243,7 @@ errval_t mm_add(struct mm *mm, struct capref cap)
     // Check the free objects in the slab allocator and refill accordingly
     slab_refill_check(&(mm->slab_allocator));
 
-    // Creating the freelist using mm node
+    // Call inserNode function to create the freelist using mm node
     err = insertNode_free_list(mm, &(mm->free_list), size, base_addr,cap,capability_base);
     if (err_is_fail(err)) {
         grading_printf("fauled to allocate memory");
@@ -264,7 +264,7 @@ errval_t mm_add(struct mm *mm, struct capref cap)
 
 /**
  * @brief splits a node into two, creating a new node before the current node
- *
+ * New node before the original node
  * @param[in]  mm         memory manager instance to allocate from
  * @param[in]  node       the node to split on
  * @param[in]  size       the size to split off
@@ -275,14 +275,13 @@ errval_t mm_add(struct mm *mm, struct capref cap)
  *  - @retval MM_ERR_SLAB_ALLOC_FAIL    failed to allocate memory for meta data
  */
 static errval_t mm_split_beginning(struct mm *mm, struct mm_node *node, size_t size, bool used) {
-    // allocate space for the new node and set the fields
     slab_refill_check(&(mm->slab_allocator));
     struct mm_node *splitoff = slab_alloc(&mm->slab_allocator);
     if (splitoff == NULL) {
         return MM_ERR_SLAB_ALLOC_FAIL;
     }
 
-    // set the new node's fields
+    // Initializes new node's fields
     splitoff->base_addr = node->base_addr;
     splitoff->size = size;
     splitoff->used = used;
@@ -291,12 +290,14 @@ static errval_t mm_split_beginning(struct mm *mm, struct mm_node *node, size_t s
     splitoff->cap = node->cap;
     splitoff->capability_base = node->capability_base;
 
-
+    // If the original node was the head of the list
     if (node->prev == NULL) {
         mm->free_list.head = splitoff;
     } else {
         node->prev->next = splitoff;
     }
+
+    // update the original node
     node->base_addr += size;
     node->size -= size;
     node->prev = splitoff;
@@ -317,14 +318,13 @@ static errval_t mm_split_beginning(struct mm *mm, struct mm_node *node, size_t s
  *  - @retval MM_ERR_SLAB_ALLOC_FAIL    failed to allocate memory for meta data
  */
 static errval_t mm_split_end(struct mm *mm, struct mm_node *node, size_t size, bool used) {
-    // allocate space for the new node and set the fields
     slab_refill_check(&(mm->slab_allocator));
     struct mm_node *splitoff = slab_alloc(&mm->slab_allocator);
     if (splitoff == NULL) {
         return MM_ERR_SLAB_ALLOC_FAIL;
     }
 
-    // set the new node's fields
+    // Initializes new node's fields
     splitoff->base_addr = node->base_addr + size;
     splitoff->size = node->size - size;
     splitoff->used = used;
@@ -333,6 +333,7 @@ static errval_t mm_split_end(struct mm *mm, struct mm_node *node, size_t size, b
     splitoff->cap = node->cap;
     splitoff->capability_base = node->capability_base;
     
+    // update the original node
     node->size = size;
     node->next = splitoff;
 
@@ -376,6 +377,7 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
         return MM_ERR_OUT_OF_MEMORY;
     }
 
+    // Ensure it's page aligned
     size_t aligned_size = ROUND_UP(size, BASE_PAGE_SIZE);
 
     // Check the free objects in the slab allocator and refill accordingly
@@ -383,27 +385,41 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 
     struct mm_node *current = mm->free_list.head;
     
+     // Find a suitable block that meets the alignment and size requirements
     while (current != NULL) {
         uintptr_t current_base = current->base_addr;
         size_t current_size = current->size;
 
+        // Also represents how much space must be skipped to align the memory
+        // Calculated based on how far the current_base is from being aligned
         size_t alignment_offset = alignment - (current_base % alignment);
 
-        if (alignment_offset == alignment) {
-            alignment_offset = 0;
-        } else if (alignment_offset >= current->size) {
-            continue;
-        }
-
+        // Amount of usable space left in the memory block after skipping over the misaligned portion
         size_t potential_size = current_size - alignment_offset;
+
         if (current->used == false && potential_size >= aligned_size && potential_size >= BASE_PAGE_SIZE) {
-            // split a node if there is enough space but the alignment is not correct
+
+           
+            /**
+            Purpose of this split: we cannot use the misaligned part at the beginning.
+            By splitting off the unaligned portion, the mm preserves the remaining aligned memory, 
+            which can then be allocated to the user without violating the alignment requirement.
+            */  
+
+            // split a node if there is enough space but not aligned
             if (alignment_offset > 0) {
                 errval_t err = mm_split_beginning(mm, current, alignment_offset, false);
                 if (err_is_fail(err)) {
                     return err;
                 }
             }
+
+
+            /**
+            Purpose of this split: after the first spit, the second block is aligned, we ready to 
+            do allocation. If current size is enough, we allocate this to the requested and split 
+            the remanning free space.
+            */  
 
             // split off the remainder of the node if possible
             if (current_size > aligned_size) {
@@ -458,7 +474,7 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 
 /**
  * @brief allocates memory of a given size within a given base-limit range (EXTRA CHALLENGE)
- *
+ * memory allocation is constrained to a region that falls between the base and limit addresses
  * @param[in]  mm         memory manager instance to allocate from
  * @param[in]  base       minimum requested address of the memory region to allocate
  * @param[in]  limit      maximum requested address of the memory region to allocate
@@ -483,7 +499,7 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, size_t size,
                                      size_t alignment, struct capref *retcap)
 {
-     printf("Calling mm_alloc_aligned\n");   
+    printf("Calling mm_alloc_aligned\n");   
     printf("Before allocation - nslots: %u, space: %u\n", mm->ca->nslots, mm->ca->space);
 
     // Alignment Validation 
@@ -494,6 +510,7 @@ errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, s
         return MM_ERR_OUT_OF_MEMORY;
     }
 
+    // Ensure it's page aligned
     size_t aligned_size = ROUND_UP(size, BASE_PAGE_SIZE);
 
     // Check the free objects in the slab allocator and refill accordingly
@@ -501,6 +518,7 @@ errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, s
 
     struct mm_node *current = mm->free_list.head;
     
+    // Find a suitable block that meets the alignment and size requirements
     while (current != NULL) {
         uintptr_t current_base = current->base_addr;
         size_t current_size = current->size;
@@ -546,7 +564,7 @@ errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, s
                 return MM_ERR_SLOT_ALLOC_FAIL;
             }
 
-            // copy the original capability into the new slot
+            // Calculate how far the current memory block is located within the memory region controlled by the capability
             gensize_t aligned_offset = current->base_addr - current->capability_base;
             if (aligned_offset % alignment != 0) {
                 aligned_offset = aligned_offset + alignment - (aligned_offset % alignment);
@@ -619,14 +637,11 @@ errval_t mm_free(struct mm *mm, struct capref cap)
         return MM_ERR_CAP_TYPE;
     }
 
-    // get the base address and size of memory region of which is going to be free
-    //uintptr_t free_base = c.u.ram.base;
-    //size_t free_size = c.u.ram.bytes;
-
     // traverse the free-list to find the allocated node that includes the region
     struct mm_node *current = mm->free_list.head;
     //bool found = false;
 
+    //For each node, the code checks if the memory region is within the current node's memory range.
     for (current = mm->free_list.head; current != NULL; current = current->next) {
         if (c.u.ram.base >= current->base_addr && c.u.ram.base + c.u.ram.bytes <= current->base_addr + current->size) {
             break;

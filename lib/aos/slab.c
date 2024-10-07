@@ -222,7 +222,8 @@ errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref fr
     if (fi.bytes < minbytes) {
         return PORT_ERR_NOT_ENOUGH_MEMORY;
     }
-
+    
+    // Must be mapped into the virtual address space so that the process can access and use the memory for allocations
     // Map the frame into virtual memory if not already mapped
     void *buf;
     err = paging_map_frame_attr(get_current_paging_state(), &buf, fi.bytes, frame_slot, VREGION_FLAGS_READ_WRITE);

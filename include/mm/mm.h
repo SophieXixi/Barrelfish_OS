@@ -26,29 +26,20 @@
 __BEGIN_DECLS
 
 
-/**
- * @brief structure of the free list
- *
- * @note: Kerwin: I prefer to use the linkled list here.
- * Reason: easy to coalesce adjacent free blocks later.
- *       
- */
+//track free blocks of memory that are available for allocation
 struct free_list {
     struct mm_node *head;     
 };
 
-struct region_list {
-    struct mm_node *head;     
-};
 
 // Node in the free list (meta-data)
 struct mm_node {
     size_t size;                  // Size of the free memory block
     uintptr_t base_addr;          // Base address of the free memory block
     struct mm_node *next;         // Pointer to the next node in the free list
-    struct mm_node *prev;          // Pointer to the prev node in the free list
-    bool used;                   // whether or not this data is in use
-    struct capref cap;
+    struct mm_node *prev;         // Pointer to the prev node in the free list
+    bool used;                    // whether or not this data is in use
+    struct capref cap;              
     size_t offset;
     uintptr_t capability_base;
 };
@@ -314,8 +305,7 @@ void mm_mem_get_free_range(struct mm *mm, lpaddr_t *base, lpaddr_t *limit);
 
 
 // Prototype for functions below
-void free_list_init(struct free_list *list);
-void region_list_init(struct region_list *list);
+void free_list_init(struct free_list *list);;
 errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap, genpaddr_t capability_base);
 bool is_power_of_two(size_t x);
 

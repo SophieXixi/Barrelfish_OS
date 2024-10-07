@@ -118,7 +118,10 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
-    pt_alloc(st, ObjType_VNode_AARCH64_l1, &st->L1);
+    pt_alloc(st, ObjType_VNode_AARCH64_l1, &st->L1); // Creates the VNode for the L1 table
+
+    // VMSAv8_64_L0_INDEX(st->current_vaddr): index in the L0 page table where the L1 page table should be mapped
+    // VREGION_FLAGS_READ_WRITE: Permission
     err = vnode_map(st->root, st->L1, VMSAv8_64_L0_INDEX(st->current_vaddr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping);
     if (err_is_fail(err)) {
         printf("Error: Failed to map L1 page table: %s\n", err_getstring(err));
@@ -179,6 +182,11 @@ errval_t paging_init(void)
     // TIP: it might be a good idea to call paging_init_state() from here to
     // avoid code duplication.
 
+    /**
+    (uint64_t)1)<<46: starting virtual address for the domain's memory space
+    Lower part of the virtual address space -> kernel operations, higher part for user-space processes
+    We here map the the upper part of the virtual address space
+    */
     paging_init_state(&current, ((uint64_t)1)<<46, cap_vroot, get_default_slot_allocator());
     set_current_paging_state(&current);
     
@@ -248,17 +256,15 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
     
 
     // M1:
-    size_t aligned_bytes = ROUND_UP(bytes, alignment);
 
-    // Ensure there is enough space; use linear allocation from current_vaddr
-    // genvaddr_t vaddr = ROUND_UP(st->current_vaddr, alignment); 
+    // Size of the allocated region is rounded up to the nearest multiple of the alignment value
+    size_t aligned_bytes = ROUND_UP(bytes, alignment); 
     
-    // Assign the starting address to the buffer pointer
+    // Represents the starting address of the next free virtual memory region
     *buf = (void *) st->current_vaddr;
 
     // Move the current_vaddr forward by the allocated size to prepare for the next allocation
     st->current_vaddr += aligned_bytes;
-
    
     return SYS_ERR_OK;
 }
@@ -292,44 +298,41 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     // - Map the user provided frame at the free virtual address
     // - return the virtual address in the buf parameter
     
-    // Log the function entry
     printf("Invoke the paging_map_frame_attr_offset\n");
 
-    // Step 1: Check if the size is aligned with the base page size
+    // Check if the size is aligned with the base page size
     if (bytes % BASE_PAGE_SIZE != 0) {
         printf("Error: bytes = %zu is not aligned with BASE_PAGE_SIZE = %zu\n", bytes, BASE_PAGE_SIZE);
         return MM_ERR_BAD_ALIGNMENT;
     }
-    printf("Step 1: Alignment check passed (bytes = %zu)\n", bytes);
 
-    // Step 2: Allocate a slot for the mapping (where the frame is placed in the page table)
+    // Allocate a slot for the mapping (where the frame is placed in the page table)
     struct capref mapping;
-    printf("Step 2: Allocating slot for mapping\n");
+    printf("Allocating slot for mapping\n");
     errval_t err = st->slot_alloc->alloc(st->slot_alloc, &(mapping));
     if (err_is_fail(err)) {
         printf("Error: Slot allocation failed\n");
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
-    printf("Step 2: Slot allocated successfully\n");
+    printf("Slot allocated successfully\n");
 
-    // Step 3: Map the frame at the found virtual address using vnode_map
-    printf("Step 3: Mapping frame at virtual address %p\n", (void*)st->current_vaddr);
+    // Map the frame at the found virtual address using vnode_map
+    printf("Mapping frame at virtual address %p\n", (void*)st->current_vaddr);
     err = vnode_map(st->L3, frame, VMSAv8_64_L3_INDEX(st->current_vaddr), flags, offset, 1, mapping);
     if (err_is_fail(err)) {
         printf("Error: vnode_map failed (virtual address = %p)\n", (void*)st->current_vaddr);
         return err_push(err, LIB_ERR_VNODE_MAP);
     }
-    printf("Step 3: Frame successfully mapped at virtual address %p\n", (void*)st->current_vaddr);
+    printf("Frame successfully mapped at virtual address %p\n", (void*)st->current_vaddr);
 
-    // Step 4: Return the base virtual address of the mapped frame
+    // Return the base virtual address of the mapped frame
     *buf = (void*)st->current_vaddr;
-    printf("Step 4: Returning base virtual address %p\n", *buf);
+    printf("Returning base virtual address %p\n", *buf);
 
-    // Step 5: Update the current virtual address for the next allocation
+    // Update the current virtual address for the next allocation
     st->current_vaddr += bytes;
-    printf("Step 5: Updated current_vaddr to %p\n", (void*)st->current_vaddr);
+    printf("Updated current_vaddr to %p\n", (void*)st->current_vaddr);
 
-    // Return success
     printf("Exiting paging_map_frame_attr_offset successfully\n");
     return SYS_ERR_OK;
 }
