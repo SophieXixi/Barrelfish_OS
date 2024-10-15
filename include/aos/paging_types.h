@@ -48,14 +48,24 @@ struct page_table {
    struct capref cap;
 };
 
+struct vmm {
+    lvaddr_t start_addr;
+    size_t size;
+    struct vmm *next;
+    struct vmm *pre;
+    bool used;
+};
+
+struct vmm_list {
+    struct vmm *head;
+};
+
 /// struct to store the paging state of a process' virtual address space.
 struct paging_state {
     /// slot allocator to be used for this paging state
     struct slot_allocator *slot_alloc;
-    lvaddr_t start_vaddr;
-    lvaddr_t current_vaddr;
+    struct vmm_list *vmm_list;
     struct slab_allocator slab_allocator;
-
     
     struct page_table *pageTable;
 

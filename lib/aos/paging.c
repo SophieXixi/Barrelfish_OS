@@ -97,8 +97,15 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 
     // Step 1: Initialize basic paging state
     printf("Step 1: Initializing basic paging state\n");
-    st->current_vaddr = start_vaddr;
-    st->start_vaddr = start_vaddr;
+    struct vmm vmm;
+    vmm.start_addr = start_vaddr;
+    vmm.size = VMSAv8_64_L1_BLOCK_SIZE;
+    vmm.next = NULL;
+    vmm.pre = NULL;
+    vmm.used = false;
+    struct vmm_list vmm_list;
+    vmm_list.head = &vmm;
+    st->vmm_list = &vmm_list;
     st->slot_alloc = ca;
 
     // Step 2: Initialize slab allocator for page table structures
@@ -122,7 +129,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
 
     // VMSAv8_64_L0_INDEX(st->current_vaddr): index in the L0 page table where the L1 page table should be mapped
     // VREGION_FLAGS_READ_WRITE: Permission
-    err = vnode_map(st->root, st->L1, VMSAv8_64_L0_INDEX(st->current_vaddr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping);
+    err = vnode_map(st->root, st->L1, VMSAv8_64_L0_INDEX(st->vmm_list->head->start_addr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping);
     if (err_is_fail(err)) {
         printf("Error: Failed to map L1 page table: %s\n", err_getstring(err));
         return -1;
@@ -136,7 +143,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
     pt_alloc(st, ObjType_VNode_AARCH64_l2, &st->L2);
-    err = vnode_map(st->L1, st->L2, VMSAv8_64_L1_INDEX(st->current_vaddr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping2);
+    err = vnode_map(st->L1, st->L2, VMSAv8_64_L1_INDEX(st->vmm_list->head->start_addr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping2);
     if (err_is_fail(err)) {
         printf("Error: Failed to map L2 page table: %s\n", err_getstring(err));
         return -1;
@@ -150,7 +157,7 @@ errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
     pt_alloc(st, ObjType_VNode_AARCH64_l3, &st->L3);
-    err = vnode_map(st->L2, st->L3, VMSAv8_64_L2_INDEX(st->current_vaddr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping3);
+    err = vnode_map(st->L2, st->L3, VMSAv8_64_L2_INDEX(st->vmm_list->head->start_addr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping3);
     if (err_is_fail(err)) {
         printf("Error: Failed to map L3 page table: %s\n", err_getstring(err));
         return -1;
@@ -253,18 +260,10 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
      *   - Find a region of free virtual address space that is large enough to
      *     accomodate a buffer of size `bytes`.
      */
-    
-
-    // M1:
-
-    // Size of the allocated region is rounded up to the nearest multiple of the alignment value
-    size_t aligned_bytes = ROUND_UP(bytes, alignment); 
-    
-    // Represents the starting address of the next free virtual memory region
-    *buf = (void *) st->current_vaddr;
-
-    // Move the current_vaddr forward by the allocated size to prepare for the next allocation
-    st->current_vaddr += aligned_bytes;
+    (void) buf;
+    (void) bytes;
+    (void) st;
+    (void) alignment;
    
     return SYS_ERR_OK;
 }
@@ -287,6 +286,13 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
 {
+    (void) st;
+    (void) buf;
+    (void) bytes;
+    (void) frame;
+    (void) offset;
+    (void) flags;
+
     // TODO(M1):
     //  - decide on which virtual address to map the frame at
     //  - map the frame assuming all mappings will fit into one leaf page table (L3)  (fail otherwise)
@@ -317,21 +323,6 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     printf("Slot allocated successfully\n");
 
     // Map the frame at the found virtual address using vnode_map
-    printf("Mapping frame at virtual address %p\n", (void*)st->current_vaddr);
-    err = vnode_map(st->L3, frame, VMSAv8_64_L3_INDEX(st->current_vaddr), flags, offset, 1, mapping);
-    if (err_is_fail(err)) {
-        printf("Error: vnode_map failed (virtual address = %p)\n", (void*)st->current_vaddr);
-        return err_push(err, LIB_ERR_VNODE_MAP);
-    }
-    printf("Frame successfully mapped at virtual address %p\n", (void*)st->current_vaddr);
-
-    // Return the base virtual address of the mapped frame
-    *buf = (void*)st->current_vaddr;
-    printf("Returning base virtual address %p\n", *buf);
-
-    // Update the current virtual address for the next allocation
-    st->current_vaddr += bytes;
-    printf("Updated current_vaddr to %p\n", (void*)st->current_vaddr);
 
     printf("Exiting paging_map_frame_attr_offset successfully\n");
     return SYS_ERR_OK;
@@ -358,12 +349,46 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
                                       size_t bytes, size_t offset, int flags)
 {
     // make compiler happy about unused parameters
-    (void)st;
-    (void)vaddr;
-    (void)frame;
-    (void)bytes;
-    (void)offset;
-    (void)flags;
+    printf("Invoke the paging_map_fixed_attr_offset\n");
+    // step 1: check the availability of the vaddr
+    struct vmm *curr_vmm = st->vmm_list->head;
+    struct vmm * next_vmm;
+    while (curr_vmm->next != NULL) {
+        next_vmm = curr_vmm->next;
+        if (next_vmm->start_addr <= vaddr) {    // should go to next node
+            curr_vmm = next_vmm;
+        } else if (curr_vmm->start_addr + curr_vmm->size < bytes) {    // not enough space
+            return LIB_ERR_MEMOBJ_FILL;
+        } else if (curr_vmm->used) {        // already used
+            return LIB_ERR_MEMOBJ_DUPLICATE_FILL;
+        } else {
+            break;
+        }
+    }
+    if (curr_vmm->next == NULL) {
+        if (curr_vmm->start_addr + curr_vmm->size < bytes) {    // not enough space
+            return LIB_ERR_MEMOBJ_FILL;
+        } else if (curr_vmm->used) {        // already used
+            return LIB_ERR_MEMOBJ_DUPLICATE_FILL;
+        }
+    }
+    // step 2: map the frame
+    printf("Allocating slot for mapping\n");
+    struct capref mapping;
+    errval_t err = st->slot_alloc->alloc(st->slot_alloc, &(mapping));
+    if (err_is_fail(err)) {
+        printf("Error: Slot allocation failed\n");
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+    printf("Slot allocated successfully\n");
+    // Map the frame at the found virtual address using vnode_map
+    printf("Mapping frame at virtual address %p\n", vaddr);
+    err = vnode_map(st->L3, frame, VMSAv8_64_L3_INDEX(vaddr), flags, offset, 1, mapping);
+    if (err_is_fail(err)) {
+        printf("Error: vnode_map failed (virtual address = %p)\n", vaddr);
+        return err_push(err, LIB_ERR_VNODE_MAP);
+    }
+    printf("Frame successfully mapped at virtual address %p\n", vaddr);
 
     // TODO(M2):
     //  - General case: you will need to handle mappings spanning multiple leaf page tables.
