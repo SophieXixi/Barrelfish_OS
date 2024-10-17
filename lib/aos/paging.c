@@ -259,113 +259,55 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
      *     accomodate a buffer of size `bytes`.
      */
     // calculate the required page
-    size_t page_num = adjust_size(bytes);
-    // for root table entries
-    for (size_t i = 0; i < VMSAv8_64_PTABLE_NUM_ENTRIES; i++) {
-        if (st->meta_pt->pgtb_entry[i] == NULL) {
-            // alloc new L1 page table
-            struct pgtb_entry new_l1;
-            errval_t          err = alloc_new_pt_l1(st, i, &new_l1);
-            if (err_is_fail(err)) {
-                return err;
-            }
-            st->meta_pt->pgtb_entry[i] = &new_l1;
-            struct pgtb_entry new_l2;  // since we newly alloc l1, l2 should be null, and so does l3
-            err = alloc_new_pt_l2(st, st->meta_pt->pgtb_entry[i]->next_level_pt, 0, &new_l2);
-            if (err_is_fail(err)) {
-                return err;
-            }
-            st->meta_pt->pgtb_entry[i]->children->pgtb_entry[0] = &new_l2;
-            lvaddr_t addr                                       = i << (VMSAv8_64_L1_BLOCK_BITS);
-            size_t   z                                          = 0;
-            while (z < page_num) {
-                struct pgtb_entry new_l3;
-                err = alloc_new_pt_l3(st, &new_l3);
-                if (err_is_fail(err)) {
-                    return err;
+
+    lvaddr_t aligned_addr;
+    
+    struct vmm *curr = st->vmm_list->head;
+    
+    while (curr != NULL) {
+        // Check if the current node has free space and is large enough for allocation
+        if (!curr->used && curr->size >= bytes) {
+            // Calculate the aligned start address
+            aligned_addr = (curr->start_addr + alignment - 1) & ~(alignment - 1);
+
+            // Ensure that the aligned address fits within the current node's space
+            if ((aligned_addr + bytes) <= (curr->start_addr + curr->size)) {
+                
+                // Step 2: Split the current node
+                size_t remaining_space = curr->size - (aligned_addr - curr->start_addr + bytes);
+
+                // Create a new node for the remaining free space if needed
+                if (remaining_space > 0) {
+                    struct vmm *new_node = malloc(sizeof(struct vmm));
+                    new_node->start_addr = aligned_addr + bytes;
+                    new_node->size = remaining_space;
+                    new_node->used = false;
+                    new_node->next = curr->next;
+                    new_node->prev = curr;
+
+                    // Update the current node to reflect the allocated space
+                    curr->next = new_node;
+                    curr->size = aligned_addr - curr->start_addr + bytes;
                 }
-                new_l3.meta_data  = false;
-                new_l3.start_addr = addr;
-                new_l3.num_page   = page_num;
-                st->meta_pt->pgtb_entry[i]->children->pgtb_entry[0]->children->pgtb_entry[z]
-                    = &new_l3;
-            }
-            *buf = (void *)addr;
-            return SYS_ERR_OK;
-        } else {
-            // there are some used entries in a L1
-            for (size_t j = 0; j < VMSAv8_64_PTABLE_NUM_ENTRIES; j++) {
-                // L1 constructed, L2 does not
-                if (st->meta_pt->pgtb_entry[i]->children->pgtb_entry[j] == NULL) {
-                    struct pgtb_entry new_l2;
-                    errval_t err = alloc_new_pt_l2(st, st->meta_pt->pgtb_entry[i]->next_level_pt, j,
-                                                   &new_l2);
-                    if (err_is_fail(err)) {
-                        return err;
-                    }
-                    st->meta_pt->pgtb_entry[i]->children->pgtb_entry[j] = &new_l2;
-                    lvaddr_t addr = (i << (VMSAv8_64_L1_BLOCK_BITS))
-                                    | (j << (VMSAv8_64_L2_BLOCK_BITS));
-                    size_t z = 0;
-                    while (z < page_num) {
-                        struct pgtb_entry new_l3;
-                        err = alloc_new_pt_l3(st, &new_l3);
-                        if (err_is_fail(err)) {
-                            return err;
-                        }
-                        new_l3.meta_data  = false;
-                        new_l3.start_addr = addr;
-                        new_l3.num_page   = page_num;
-                        st->meta_pt->pgtb_entry[i]->children->pgtb_entry[j]->children->pgtb_entry[z]
-                            = &new_l3;
-                    }
-                    *buf = (void *)addr;
-                    return SYS_ERR_OK;
-                } else {
-                    // there are some used entries in L2
-                    for (size_t k = 0; k < VMSAv8_64_PTABLE_NUM_ENTRIES; k = k + alignment) {
-                        // L3 table not constructed
-                        size_t cumulated_avail_num_slot = 0;
-                        while (cumulated_avail_num_slot < page_num) {
-                            if (st->meta_pt->pgtb_entry[i]
-                                    ->children->pgtb_entry[j]
-                                    ->children->pgtb_entry[k]
-                                == NULL) {
-                                cumulated_avail_num_slot = cumulated_avail_num_slot + 1;
-                            } else {
-                                break;
-                            }
-                        }
-                        if (cumulated_avail_num_slot == page_num) {
-                            lvaddr_t addr = (i << (VMSAv8_64_L1_BLOCK_BITS))
-                                            | (j << (VMSAv8_64_L2_BLOCK_BITS))
-                                            | (k << (VMSAv8_64_BASE_PAGE_BITS));
-                            size_t z = 0;
-                            while (z < page_num) {
-                                struct pgtb_entry new_l3;
-                                errval_t          err = alloc_new_pt_l3(st, &new_l3);
-                                if (err_is_fail(err)) {
-                                    return err;
-                                }
-                                new_l3.meta_data  = false;
-                                new_l3.start_addr = addr;
-                                new_l3.num_page   = page_num;
-                                st->meta_pt->pgtb_entry[i]
-                                    ->children->pgtb_entry[j]
-                                    ->children->pgtb_entry[k + z]
-                                    = &new_l3;
-                            }
-                            *buf = (void *)addr;
-                            return SYS_ERR_OK;
-                        }
-                    }
-                }
+
+                // Mark the current node as used and store the address
+                curr->used = true;
+                *buf = (void *)aligned_addr;
+
+                // Return the success code
+                return SYS_ERR_OK;
             }
         }
+
+        // Move to the next region
+        curr = curr->next;
     }
 
+    // If no space found, return an error
     return SYS_ERR_OK;
 }
+
+
 
 size_t adjust_alignment(size_t pages)
 {
