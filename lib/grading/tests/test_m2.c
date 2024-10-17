@@ -220,8 +220,8 @@ errval_t grading_run_tests_virtual_memory(bool early)
     grading_printf("# TESTS: Milestone 2 (Virtual Memory Management) \n");
     grading_printf("#################################################\n");
 
-    alloc_and_map_fixed();
     alloc_and_map_one();
+    alloc_and_map_fixed();
     alloc_and_map_many();
     alloc_heap();
 
