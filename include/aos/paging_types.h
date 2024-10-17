@@ -41,39 +41,42 @@
 
 typedef int paging_flags_t;
 
-struct page_table_entry {
-    struct capref mapping;      // mapping capref
-    struct page_table *next_level;
-};
 
 struct page_table {
-    struct page_table_entry *pte[VMSAv8_64_PTABLE_NUM_ENTRIES];
-    struct capref cap;          // the capref of the table
+    struct page_table *next;
+    size_t offset;
+    struct capref cap;
 };
 
-struct pgtb_entry {
-    bool meta_data;
-    lvaddr_t start_addr;            // when meta_data = false;
-    size_t num_page;                    // when meta_data = false;
-    struct capref next_level_pt;    // when meta_data = true; capref of children
-    struct capref mapping;          
-    struct pgtb *children;// when meta_data = true;
+
+struct vmm {
+    lvaddr_t start_addr;   
+    size_t size;           
+    bool used;             
+    struct vmm *next;      
+    struct vmm *prev;      
 };
 
-struct pgtb{
-    struct pgtb_entry *pgtb_entry[VMSAv8_64_PTABLE_NUM_ENTRIES];
-    struct pgtb *parent;
+struct vmm_list {
+    struct vmm *head;     
 };
+
+
 
 /// struct to store the paging state of a process' virtual address space.
 struct paging_state {
     /// slot allocator to be used for this paging state
-    lvaddr_t start_vaddr;
     struct slot_allocator *slot_alloc;
+    struct vmm_list *vmm_list;
     struct slab_allocator slab_allocator;
-    struct pgtb *meta_pt;
+    
+    struct page_table *pageTable;
+
+
     struct capref root;
-    struct page_table *l0;
+    struct capref L1;
+    struct capref L2;
+    struct capref L3;
     /// virtual address from which to allocate from.
     /// TODO(M2): replace me with proper region management
 };
