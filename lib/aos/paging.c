@@ -21,6 +21,7 @@
 #include <arch/aarch64/arch/threads.h>
 #include <stdio.h>
 #include <string.h>
+#include <mm/mm.h>
 
 #define EXCEPTION_STACK_SIZE (1 << 14)
 #define LAZY_MAP_CAP_SIZE (BASE_PAGE_SIZE * 128)
@@ -315,23 +316,23 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     //  - think about what mapping configurations are actually possible
 
     // Lazy
-    errval_t err = paging_alloc(st, buf, bytes, BASE_PAGE_SIZE);
-    if (err_is_fail(err)) {
-        return err_push(err, SYS_ERR_ID_SPACE_EXHAUSTED);
-    }
+    // errval_t err = paging_alloc(st, buf, bytes, BASE_PAGE_SIZE);
+    // if (err_is_fail(err)) {
+    //     return err_push(err, SYS_ERR_ID_SPACE_EXHAUSTED);
+    // }
 
-    printf("Reserved virtual address range [%p - %p] for lazy allocation\n",
-           (void *)(*buf), (void *)((genvaddr_t)(*buf) + bytes));
+    // printf("Reserved virtual address range [%p - %p] for lazy allocation\n",
+    //        (void *)(*buf), (void *)((genvaddr_t)(*buf) + bytes));
 
     paging_alloc(st, buf, bytes, BASE_PAGE_SIZE);
     
     // This eager allocation works
-    // genvaddr_t vaddr = (genvaddr_t)*buf;
-    // errval_t err = paging_map_fixed_attr_offset(st, vaddr, frame, bytes, offset, flags);
-    // if (err_is_fail(err)) {
-    //     printf("vnode_map failed: %s\n", err_getstring(err));
-    //     return -1;
-    // }
+    genvaddr_t vaddr = (genvaddr_t)*buf;
+    errval_t err = paging_map_fixed_attr_offset(st, vaddr, frame, bytes, offset, flags);
+    if (err_is_fail(err)) {
+        printf("vnode_map failed: %s\n", err_getstring(err));
+        return -1;
+    }
 
 
     return SYS_ERR_OK;
@@ -428,6 +429,14 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
         }
 
         // Allocate a slot for mapping pages within the L3 page table
+        //struct capref map_slot;
+        // struct slot_prealloc *ca = (struct slot_prealloc *)st->slot_alloc;
+        // result = slot_prealloc_refill(ca);
+        // result = slot_prealloc_alloc(ca, &map_slot);
+        // if (err_is_fail(result)) {
+        //     return err_push(result, LIB_ERR_SLOT_ALLOC);
+        // }
+
         struct capref map_slot;
         result = st->slot_alloc->alloc(st->slot_alloc, &map_slot);
         if (err_is_fail(result)) {
