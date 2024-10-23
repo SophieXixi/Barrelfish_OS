@@ -31,7 +31,7 @@ extern morecore_free_func_t sys_morecore_free;
 // This define enables the use of a static 16MB mini heap in the data section.
 //
 // TODO (M2): disable this define and implement a dynamic heap allocator
-#define USE_STATIC_HEAP
+//#define USE_STATIC_HEAP
 
 
 #ifdef USE_STATIC_HEAP
@@ -135,11 +135,28 @@ errval_t morecore_init(size_t alignment)
 static void *morecore_alloc(size_t bytes, size_t *retbytes)
 {
     // make compiler happy about unused parameters
-    (void)bytes;
-    (void)retbytes;
+    (void) retbytes;
 
-    USER_PANIC("NYI: implement me\n");
-    return NULL;
+    struct morecore_state *state = get_morecore_state();
+    // initialize the free pointer with the start of the heap
+    void *buf;
+    //struct capref capref;
+    debug_printf("allocate a frame for inital heap\n");
+    //frame_alloc(&capref, bytes, retbytes);
+
+    struct capref capref;
+
+    frame_alloc(&capref, bytes, NULL);
+
+    paging_map_frame_attr_offset(get_current_paging_state(), &buf, bytes, capref, 0, VREGION_FLAGS_READ_WRITE);
+
+    debug_printf("map the inital heap\n");
+    ///paging_map_frame_attr_offset(get_current_paging_state(), &buf, bytes, capref,0, VREGION_FLAGS_READ_WRITE);
+    
+    debug_printf("initalize the free pointer with the start of the heap");
+    state->freep = (char*) buf;
+    
+    return buf;
 }
 
 /**
@@ -166,9 +183,20 @@ static void morecore_free(void *base, size_t bytes)
  */
 errval_t morecore_init(size_t alignment)
 {
-    (void)alignment;
-    USER_PANIC("NYI: implement me\n");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // make compiler happy about unused parameters
+
+    struct morecore_state *state = get_morecore_state();
+
+    debug_printf("initializing static heap\n");
+
+    thread_mutex_init(&state->mutex);
+
+    state->alignment = alignment;
+    
+
+    sys_morecore_alloc = morecore_alloc;
+    sys_morecore_free = morecore_free;
+    return SYS_ERR_OK;
 }
 
 #endif /* !USE_STATIC_HEAP */

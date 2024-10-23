@@ -41,42 +41,46 @@
 
 typedef int paging_flags_t;
 
+#define NUM_PT_SLOTS 512
+
+// track which virtual address ranges are lazily allocated
+enum paging_region_type {
+    PAGING_REGION_FREE,    ///< Free virtual memory region not yet allocated
+    PAGING_REGION_LAZY,    ///< Lazily allocated region
+    PAGING_REGION_MAPPED,  ///< Fully mapped region
+};
+
+struct paging_region {
+    lvaddr_t base_addr;      ///< Base virtual address of the region
+    size_t region_size;      ///< Size of the region in bytes
+    paging_flags_t flags;    ///< Permissions (read, write, etc.)
+    enum paging_region_type type;  ///< Type of the region (lazy, mapped, free)
+    struct paging_region *next;    ///< Next region in the linked list
+};
+
 
 struct page_table {
-    struct page_table *next;
-    size_t offset;
+    struct page_table *parent;
+    struct capref mapping;
     struct capref cap;
+    struct capref self;
+    size_t offset;
+    size_t numBytes;
+    struct page_table * children[NUM_PT_SLOTS];
 };
-
-
-struct vmm {
-    lvaddr_t start_addr;   
-    size_t size;           
-    bool used;             
-    struct vmm *next;      
-    struct vmm *prev;      
-};
-
-struct vmm_list {
-    struct vmm *head;     
-};
-
-
 
 /// struct to store the paging state of a process' virtual address space.
 struct paging_state {
     /// slot allocator to be used for this paging state
     struct slot_allocator *slot_alloc;
-    struct vmm_list *vmm_list;
+    lvaddr_t start_vaddr;
+    lvaddr_t current_vaddr;
     struct slab_allocator slab_allocator;
-    
-    struct page_table *pageTable;
+    struct page_table * root;
+    struct paging_region *region_list;
+    struct thread_mutex paging_mutex;
+    struct thread_mutex heap_mutex;
 
-
-    struct capref root;
-    struct capref L1;
-    struct capref L2;
-    struct capref L3;
     /// virtual address from which to allocate from.
     /// TODO(M2): replace me with proper region management
 };
