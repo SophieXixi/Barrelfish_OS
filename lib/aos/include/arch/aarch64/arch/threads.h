@@ -21,8 +21,7 @@ extern void barrelfish_lrpc_post_syscall_instr(void);
 
 /// 16-byte alignment required for aarch64
 #define STACK_ALIGNMENT (sizeof(uint64_t) * 2)
-#define ALIGNED_STACK_TOP(stack_top)                                                     \
-    ((lvaddr_t)(stack_top) - (lvaddr_t)(stack_top) % STACK_ALIGNMENT)
+
 #define THREAD_ALIGNMENT (16)
 
 /**
