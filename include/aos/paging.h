@@ -120,13 +120,6 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags);
 
-errval_t alloc_new_pt_l1(struct paging_state *st, size_t slot, struct pgtb_entry *new_l);
-errval_t alloc_new_pt_l2(struct paging_state *st, struct capref dst, size_t slot, struct pgtb_entry *new_l);
-errval_t alloc_new_pt_l3(struct paging_state *st, struct pgtb_entry *new_l);
-
-lvaddr_t adjust_vaddr(lvaddr_t vaddr);
-size_t adjust_size(size_t bytes);
-size_t adjust_alignment(size_t pages);
 
 /**
  * @brief maps a frame at a free virtual address region and returns its address

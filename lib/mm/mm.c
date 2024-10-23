@@ -117,7 +117,7 @@ errval_t mm_init(struct mm *mm, enum objtype objtype, struct slot_allocator *ca,
     (void)slab_buf;
     (void)slab_sz;
     
-    // printf("entering mm_init");
+    printf("entering mm_init");
      
     static char initial_slab_buffer[100 * 20480]; // A temporary static buffer
     
