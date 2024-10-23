@@ -36,7 +36,7 @@
 #endif
 
 // TODO (M2): define this once your self-paging implementation works...
-#define SELF_PAGING_WORKS
+// #define SELF_PAGING_WORKS
 
 /// Maximum number of threads in a domain, used to size VM region for thread structures
 // there is no point having MAX_THREADS > LDT_NENTRIES on x86 (see ldt.c)
@@ -206,25 +206,7 @@ static errval_t refill_thread_slabs(struct slab_allocator *slabs)
 {
     // TODO(M2):
     //   - implement me!
-    //return LIB_ERR_NOT_IMPLEMENTED;
-
-    printf("refill_thread_slabs called\n");
-
-    struct paging_state *st = get_current_paging_state();
-    void *buf;
-
-    // Lazy-maps space for at least 10 threads.
-    size_t size = ROUND_UP(SLAB_STATIC_SIZE(10, slabs->blocksize), BASE_PAGE_SIZE);
-    errval_t err = paging_alloc(st, &buf, size, BASE_PAGE_SIZE
-                                   );
-    if (err_is_fail(err)) {
-        printf("refill_thread_slabs fail\n");
-        return err;
-    }    
-
-    slab_grow(slabs, buf, size);
-
-    return SYS_ERR_OK;
+    return LIB_ERR_NOT_IMPLEMENTED;
 }
 #endif
 

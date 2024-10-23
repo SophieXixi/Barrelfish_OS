@@ -144,11 +144,7 @@ static void *morecore_alloc(size_t bytes, size_t *retbytes)
     debug_printf("allocate a frame for inital heap\n");
     //frame_alloc(&capref, bytes, retbytes);
 
-    struct capref capref;
-
-    frame_alloc(&capref, bytes, NULL);
-
-    paging_map_frame_attr_offset(get_current_paging_state(), &buf, bytes, capref, 0, VREGION_FLAGS_READ_WRITE);
+    paging_alloc(get_current_paging_state(), &buf, bytes, state->alignment);
 
     debug_printf("map the inital heap\n");
     ///paging_map_frame_attr_offset(get_current_paging_state(), &buf, bytes, capref,0, VREGION_FLAGS_READ_WRITE);
