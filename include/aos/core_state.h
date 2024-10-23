@@ -16,7 +16,6 @@
 #ifndef LIBBARRELFISH_CORESTATE_H
 #define LIBBARRELFISH_CORESTATE_H
 
-
 #include <k_r_malloc.h>
 #include <aos/waitset.h>
 #include <aos/ram_alloc.h>
@@ -34,8 +33,6 @@ struct morecore_state {
     // for "real" morecore (lib/aos/morecore.c)
     // TODO: add some state here if needed.
     // for "static" morecore (see lib/aos/static_morecore.c)
-    size_t alignment;
-    
     char *freep;
 };
 

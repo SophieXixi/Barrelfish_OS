@@ -86,11 +86,9 @@ errval_t two_level_alloc(struct slot_allocator *ca, struct capref *ret)
         thread_mutex_lock(&ca->mutex);
 
         // Buffers
-        
         void *buf = slab_alloc(&mca->slab);
         if (!buf) { /* Grow slab */
             // Allocate slot out of the list
-            printf("&mac->slab needs to be refilled\n: %p\n", &mca->slab);
             mca->a.space--;
 
             thread_mutex_unlock(&ca->mutex);
@@ -99,13 +97,11 @@ errval_t two_level_alloc(struct slot_allocator *ca, struct capref *ret)
             struct capref frame;
             err = mca->a.alloc(&mca->a, &frame);
             if (err_is_fail(err)) {
-                debug_printf("problem in two-level slot alloc \n");
                 return err_push(err, LIB_ERR_SLOT_ALLOC);
             }
             // use slab refill function that never causes a pagefault
             err = slab_refill_no_pagefault(&mca->slab, frame, SLAB_STATIC_SIZE(1, mca->slab.blocksize));
             if (err_is_fail(err)) {
-                debug_printf("problem here in two-level slot allocator's slab refill\n");
                 return err_push(err, LIB_ERR_SLAB_REFILL);
             }
             thread_mutex_lock(&ca->mutex);
@@ -114,7 +110,6 @@ errval_t two_level_alloc(struct slot_allocator *ca, struct capref *ret)
             buf = slab_alloc(&mca->slab);
             if (!buf) {
                 thread_mutex_unlock(&ca->mutex);
-                debug_printf("problem here in re allocate slab in two-level slot allocator\n");
                 return err_push(err, LIB_ERR_SLAB_ALLOC_FAIL);
             }
         }
