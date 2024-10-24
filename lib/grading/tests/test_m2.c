@@ -204,6 +204,106 @@ static void alloc_heap(void)
     grading_test_pass("V1-4", "alloc_heap\n");
 }
 
+static void test_paging_unmap_success(void)
+{
+    grading_printf("test_paging_unmap_success()\n");
+
+    struct paging_state *st = get_current_paging_state();
+    struct capref frame;
+    errval_t err;
+
+    // Allocate a frame and map it
+    grading_printf("Allocating and mapping frame for unmap test\n");
+    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+    if (err_is_fail(err)) {
+        grading_test_fail("V1-unmap", "Frame allocation failed\n");
+        return;
+    }
+
+    void *buf;
+    err = paging_map_frame(st, &buf, BASE_PAGE_SIZE, frame);
+    if (err_is_fail(err)) {
+        grading_test_fail("V1-unmap", "Frame mapping failed\n");
+        return;
+    }
+
+    grading_printf("Frame mapped at address: %p\n", buf);
+
+    // Now unmap the frame
+    grading_printf("Unmapping the frame at address: %p\n", buf);
+    err = paging_unmap(st, buf);
+    if (err_is_fail(err)) {
+        grading_test_fail("V1-unmap", "Failed to unmap the region\n");
+        return;
+    }
+
+    grading_printf("Successfully unmapped the frame\n");
+
+    grading_test_pass("V1-unmap", "paging_unmap success\n");
+}
+
+static void test_paging_unmap_invalid(void)
+{
+    grading_printf("test_paging_unmap_invalid()\n");
+
+    struct paging_state *st = get_current_paging_state();
+    
+    // Try to unmap a non-existent region
+    void *invalid_region = (void *)0xdeadbeef;
+    grading_printf("Attempting to unmap invalid region: %p\n", invalid_region);
+    
+    errval_t err = paging_unmap(st, invalid_region);
+    if (err == LIB_ERR_VSPACE_VREGION_NOT_FOUND) {
+        grading_test_pass("V1-unmap-invalid", "Correctly handled unmapping of invalid region\n");
+    } else {
+        grading_test_fail("V1-unmap-invalid", "Unmap of invalid region did not fail as expected\n");
+    }
+}
+
+static void test_paging_double_unmap(void)
+{
+    grading_printf("test_paging_double_unmap()\n");
+
+    struct paging_state *st = get_current_paging_state();
+    struct capref frame;
+    errval_t err;
+
+    // Allocate and map a frame
+    grading_printf("Allocating and mapping frame for double unmap test\n");
+    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+    if (err_is_fail(err)) {
+        grading_test_fail("V1-double-unmap", "Frame allocation failed\n");
+        return;
+    }
+
+    void *buf;
+    err = paging_map_frame(st, &buf, BASE_PAGE_SIZE, frame);
+    if (err_is_fail(err)) {
+        grading_test_fail("V1-double-unmap", "Frame mapping failed\n");
+        return;
+    }
+
+    grading_printf("Frame mapped at address: %p\n", buf);
+
+    // Unmap the frame
+    grading_printf("Unmapping the frame at address: %p\n", buf);
+    err = paging_unmap(st, buf);
+    if (err_is_fail(err)) {
+        grading_test_fail("V1-double-unmap", "First unmap failed\n");
+        return;
+    }
+    grading_printf("Successfully unmapped the frame (first time)\n");
+
+    // Try to unmap again
+    grading_printf("Attempting second unmap of the same region: %p\n", buf);
+    err = paging_unmap(st, buf);
+    if (err == LIB_ERR_VSPACE_VREGION_NOT_FOUND) {
+        grading_test_pass("V1-double-unmap", "Correctly handled double unmap\n");
+    } else {
+        grading_test_fail("V1-double-unmap", "Second unmap did not fail as expected\n");
+    }
+}
+
 errval_t grading_run_tests_virtual_memory(bool early)
 {
     // make compiler happy about unused parameters
@@ -226,6 +326,11 @@ errval_t grading_run_tests_virtual_memory(bool early)
     alloc_and_map_one();
     alloc_and_map_many();
     alloc_heap();
+
+    // Add the new tests for paging_unmap
+    test_paging_unmap_success();
+    test_paging_unmap_invalid();
+    test_paging_double_unmap();
 
     grading_printf("#################################################\n");
     grading_printf("# DONE:  Milestone 2 (Virtual Memory Management) \n");
