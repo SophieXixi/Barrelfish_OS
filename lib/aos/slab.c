@@ -85,6 +85,10 @@ void slab_grow(struct slab_allocator *slabs, void *buf, size_t buflen)
  */
 void *slab_alloc(struct slab_allocator *slabs)
 {
+    debug_printf("invoke slab_alloc\n");
+    size_t free_blocks = slab_freecount(slabs);
+    printf("free slabs: %d\n", free_blocks);
+    printf("slab's address: %p\n", slabs);
     errval_t err;
     /* find a slab with free blocks */
     struct slab_head *sh;
@@ -180,16 +184,19 @@ size_t slab_freecount(struct slab_allocator *slabs)
  */
 static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
+    printf("slab is refilling\n");
     errval_t err;
     struct capref cap;
 
     err = slot_alloc(&cap);
     if (err_is_fail(err)) {
+        debug_printf(err_getstring(err));
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
 
     err = slab_refill_no_pagefault(slabs, cap, bytes);
     if (err_is_fail(err)) {
+        debug_printf(err_getstring(err));
         slot_free(cap);
     }
 
@@ -209,32 +216,58 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref frame_slot,
                                   size_t minbytes)
 {
-    errval_t err;
-    struct frame_identity fi;
+    // errval_t err;
+    // struct frame_identity fi;
 
-    // Retrieve the frame's identity (its size and base address)
-    err = frame_identify(frame_slot, &fi);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_FRAME_IDENTIFY);
-    }
+    // // Retrieve the frame's identity (its size and base address)
+    // err = frame_identify(frame_slot, &fi);
+    // if (err_is_fail(err)) {
+    //     debug_printf("slab refill fault becuase of frame_identity\n");
+    //     return err_push(err, LIB_ERR_FRAME_IDENTIFY);
+    // }
 
-    // Ensure the frame contains at least the required amount of memory
-    if (fi.bytes < minbytes) {
-        return PORT_ERR_NOT_ENOUGH_MEMORY;
-    }
+    // // Ensure the frame contains at least the required amount of memory
+    // if (fi.bytes < minbytes) {
+    //     debug_printf("slab refill fault becuase the frame is not big enough\n");
+    //     return PORT_ERR_NOT_ENOUGH_MEMORY;
+    // }
     
-    // Must be mapped into the virtual address space so that the process can access and use the memory for allocations
-    // Map the frame into virtual memory if not already mapped
-    void *buf;
-    err = paging_map_frame_attr(get_current_paging_state(), &buf, fi.bytes, frame_slot, VREGION_FLAGS_READ_WRITE);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_VSPACE_MAP);
-    }
+    // // Must be mapped into the virtual address space so that the process can access and use the memory for allocations
+    // // Map the frame into virtual memory if not already mapped
+    // void *buf;
+    // err = paging_map_frame_attr(get_current_paging_state(), &buf, fi.bytes, frame_slot, VREGION_FLAGS_READ_WRITE);
+    // if (err_is_fail(err)) {
+    //     debug_printf("slab refill fault becuase of paging_map_frame_attr\n");
+    //     return err_push(err, LIB_ERR_VSPACE_MAP);
+    // }
 
-    // Add the memory to the slab allocator using the slab_grow function
-    slab_grow(slabs, buf, fi.bytes);
+    // // Add the memory to the slab allocator using the slab_grow function
+    // slab_grow(slabs, buf, fi.bytes);
 
-    return SYS_ERR_OK;
+    // return SYS_ERR_OK;
+
+    // make compiler happy about unused parameters
+(void)slabs;
+(void)frame_slot;
+(void)minbytes;
+
+errval_t err;
+// TODO: Refill the slot allocator without causing a page-fault
+size_t actualBytes;
+err = frame_create(frame_slot, minbytes, &actualBytes);
+if (err_is_fail(err)) {
+return err;
+}
+
+void *buf;
+err = paging_map_frame_attr_offset(get_current_paging_state(), &buf, actualBytes, frame_slot, 0, VREGION_FLAGS_READ_WRITE);
+if (err_is_fail(err)) {
+return err;
+}
+
+slab_grow(slabs, buf, actualBytes);
+
+return SYS_ERR_OK;
 }
 
 /**
@@ -257,6 +290,7 @@ errval_t slab_refill_check(struct slab_allocator *slabs) {
     printf("Invoke the slab_refill_check function\n");
     errval_t err = SYS_ERR_OK;
     if (slab_freecount(slabs) < 64 && !slabs->slab_refilling) { 
+        printf("time to refill the slabs\n");
         slabs->slab_refilling = true;
         err = slab_default_refill(slabs);
         slabs->slab_refilling = false;

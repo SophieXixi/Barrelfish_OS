@@ -18,10 +18,14 @@
 #include <aos/except.h>
 #include <aos/slab.h>
 #include "threads_priv.h"
-
+#include <arch/aarch64/arch/threads.h>
 #include <stdio.h>
 #include <string.h>
+#include <mm/mm.h>
 
+#define EXCEPTION_STACK_SIZE (1 << 14)
+#define LAZY_MAP_CAP_SIZE (BASE_PAGE_SIZE * 128)
+static char stack_first[EXCEPTION_STACK_SIZE];
 
 static struct paging_state current;
 
@@ -40,6 +44,7 @@ static struct paging_state current;
 static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capref *ret)
 {
     errval_t err;
+    debug_printf("invoke pt_alloc\n");
 
     assert(type == ObjType_VNode_AARCH64_l0 || type == ObjType_VNode_AARCH64_l1
            || type == ObjType_VNode_AARCH64_l2 || type == ObjType_VNode_AARCH64_l3);
@@ -47,7 +52,7 @@ static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capr
     // try to get a slot from the slot allocator to hold the new page table
     err = st->slot_alloc->alloc(st->slot_alloc, ret);
     if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
+        return err_push(err, LIB_ERR_SLOT_ALLOC); 
     }
 
 
@@ -89,57 +94,29 @@ __attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state *st, str
 errval_t paging_init_state(struct paging_state *st, lvaddr_t start_vaddr, struct capref root,
                            struct slot_allocator *ca)
 {
-    // Log function entry
-    printf("Invoking paging_init_state\n");
-    printf("Parameters: start_vaddr = %p, root = %p\n", (void*)start_vaddr, (void*)&root);
 
-    errval_t err;
-
-    // Step 1: Initialize basic paging state
-    printf("Step 1: Initializing basic paging state\n");
     st->current_vaddr = start_vaddr;
     st->start_vaddr = start_vaddr;
     st->slot_alloc = ca;
 
-    // Step 2: Initialize slab allocator for page table structures
-    printf("Step 2: Initializing slab allocator\n");
     static char initial_slab_buffer[100 * 20480];
     slab_init(&st->slab_allocator, sizeof(struct page_table), NULL);
     slab_grow(&st->slab_allocator, initial_slab_buffer, sizeof(initial_slab_buffer));
-    printf("Slab allocator initialized with a buffer of size %zu\n", sizeof(initial_slab_buffer));
-
-    // Step 3: Set the root page table
-    st->root = root;
-
-    // Step 4: Map the L1 page table
-    printf("Step 4: Mapping L1 page table\n");
-    struct capref mapping;
-    err = st->slot_alloc->alloc(st->slot_alloc, &mapping);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-    pt_alloc(st, ObjType_VNode_AARCH64_l1, &st->L1); // Creates the VNode for the L1 table
-
-    // VMSAv8_64_L0_INDEX(st->current_vaddr): index in the L0 page table where the L1 page table should be mapped
-    // VREGION_FLAGS_READ_WRITE: Permission
-    err = vnode_map(st->root, st->L1, VMSAv8_64_L0_INDEX(st->current_vaddr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping);
-    if (err_is_fail(err)) {
-        printf("Error: Failed to map L1 page table: %s\n", err_getstring(err));
-        return -1;
+    
+    st->root = slab_alloc(&st->slab_allocator); 
+     if (st->root == NULL) {
+        return LIB_ERR_SLAB_ALLOC_FAIL; 
     }
 
-    // Step 5: Map the L2 page table
-    printf("Step 5: Mapping L2 page table\n");
-    struct capref mapping2;
-    err = st->slot_alloc->alloc(st->slot_alloc, &mapping2);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-    pt_alloc(st, ObjType_VNode_AARCH64_l2, &st->L2);
-    err = vnode_map(st->L1, st->L2, VMSAv8_64_L1_INDEX(st->current_vaddr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping2);
-    if (err_is_fail(err)) {
-        printf("Error: Failed to map L2 page table: %s\n", err_getstring(err));
-        return -1;
+    // Initialize the root page table fields
+    st->root->parent = NULL;            // Root has no parent
+    st->root->mapping = root;           // Root mapping cap reference
+    st->root->cap = root;               // Root capability
+    st->root->self = root;
+    st->root->offset = 0;               // Offset is 0 for root page table
+    st->root->numBytes = 0;             // Initialize to 0, will track the size of allocations later
+    for (int i = 0; i < NUM_PT_SLOTS; i++) {
+        st->root->children[i] = NULL;   // No children initially
     }
 
     // Initialize the region list to NULL (no regions initially)
@@ -159,17 +136,6 @@ void pf_handler(enum exception_type type, int subtype, void *addr, arch_register
     } else {
         USER_PANIC(": unhandled exception (type %d) on %p\n", type, addr);
     }
-    pt_alloc(st, ObjType_VNode_AARCH64_l3, &st->L3);
-    err = vnode_map(st->L2, st->L3, VMSAv8_64_L2_INDEX(st->current_vaddr), VREGION_FLAGS_READ_WRITE, 0, 1, mapping3);
-    if (err_is_fail(err)) {
-        printf("Error: Failed to map L3 page table: %s\n", err_getstring(err));
-        return -1;
-    }
-
-    // Final Step: Print completion message
-    printf("Paging initialization completed successfully\n");
-
-    return SYS_ERR_OK;
 }
 
 
@@ -180,7 +146,6 @@ void pf_handler(enum exception_type type, int subtype, void *addr, arch_register
  */
 errval_t paging_init(void)
 {
-    printf("Invoke the function paging_init\n");
 
     // TODO (M1): Call paging_init_state for &current
 
@@ -193,12 +158,21 @@ errval_t paging_init(void)
 
     /**
     (uint64_t)1)<<46: starting virtual address for the domain's memory space
-    Lower part of the virtual address space -> kernel operations, higher part for user-space
-    processes We here map the the upper part of the virtual address space
+    Lower part of the virtual address space -> kernel operations, higher part for user-space processes
+    We here map the the upper part of the virtual address space
     */
-    paging_init_state(&current, ((uint64_t)1) << 46, cap_vroot, get_default_slot_allocator());
+    errval_t err = paging_init_state(&current, ((uint64_t)1)<<46, cap_vroot, get_default_slot_allocator());   
+    if (err_is_fail(err)) {
+        return err;
+    }
     set_current_paging_state(&current);
 
+    // Set up page fault handler for this thread
+    void *stack_top = stack_first + EXCEPTION_STACK_SIZE;
+    stack_top = (void *)ALIGNED_STACK_TOP(stack_top);
+    
+    err = thread_set_exception_handler(pf_handler, NULL, stack_first, stack_top,
+                                   NULL, NULL);
     return SYS_ERR_OK;
 }
 
@@ -240,6 +214,7 @@ errval_t paging_init_onthread(struct thread *t)
 }
 
 
+
 /**
  * @brief Find a free region of virtual address space that is large enough to accomodate a
  *        buffer of size 'bytes'.
@@ -261,17 +236,9 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
      *   - Find a region of free virtual address space that is large enough to
      *     accomodate a buffer of size `bytes`.
      */
-    // calculate the required page
-
-    lvaddr_t aligned_addr;
     
-    struct vmm *curr = st->vmm_list->head;
-    
-    while (curr != NULL) {
-        // Check if the current node has free space and is large enough for allocation
-        if (!curr->used && curr->size >= bytes) {
-            // Calculate the aligned start address
-            aligned_addr = (curr->start_addr + alignment - 1) & ~(alignment - 1);
+    printf("Invoke the paging_alloc function\n");
+    size_t aligned_bytes = ROUND_UP(bytes, alignment);
 
     // Try to find a suitable free region
     struct paging_region *prev = NULL;
@@ -303,58 +270,33 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
 
     genvaddr_t vaddr = st->current_vaddr;
 
-                // Create a new node for the remaining free space if needed
-                if (remaining_space > 0) {
-                    struct vmm *new_node = malloc(sizeof(struct vmm));
-                    new_node->start_addr = aligned_addr + bytes;
-                    new_node->size = remaining_space;
-                    new_node->used = false;
-                    new_node->next = curr->next;
-                    new_node->prev = curr;
+    // Reserve the virtual address space by incrementing current_vaddr
+    st->current_vaddr += aligned_bytes;
 
-
-                    // Update the current node to reflect the allocated space
-                    curr->next = new_node;
-                    curr->size = aligned_addr - curr->start_addr + bytes;
-                }
-
-                // Mark the current node as used and store the address
-                curr->used = true;
-                *buf = (void *)aligned_addr;
-
-                // Return the success code
-                return SYS_ERR_OK;
-            }
-        }
-
-        // Move to the next region
-        curr = curr->next;
+    // Track the lazily allocated region in the paging_state's region list
+    struct paging_region *new_region = slab_alloc(&st->slab_allocator);
+    if (new_region == NULL) {
+        return LIB_ERR_SLAB_ALLOC_FAIL;
     }
 
-    // If no space found, return an error
+    // Initialize the lazily allocated region
+    new_region->base_addr = vaddr;         // Start of the reserved virtual address range
+    new_region->region_size = aligned_bytes; // Size of the allocated virtual memory region
+    new_region->flags = VREGION_FLAGS_READ_WRITE; // Default permissions (adjust if needed)
+    new_region->type = PAGING_REGION_LAZY;  // Mark this region as lazily allocated
+    new_region->next = st->region_list;     // Add it to the head of the region list
+    st->region_list = new_region;           // Update the region list in the paging state
+
+    // Return the base virtual address of the reserved region
+    *buf = (void *)vaddr;
+
+    printf("Reserved virtual address range [%p - %p] as lazily allocated\n",
+           (void *)vaddr, (void *)(vaddr + aligned_bytes));
+
     return SYS_ERR_OK;
 }
 
 
-
-size_t adjust_alignment(size_t pages)
-{
-    size_t align = 1;
-    if (pages == 1) {
-        return 1;
-    } else {
-        size_t rest = 0;
-        while (pages >= 2) {
-            rest  = pages % 2;
-            pages = pages / 2;
-            align = align * 2;
-        }
-        if (rest == 1) {
-            align = align * 2;
-        }
-    }
-    return align;
-}
 
 
 /**
@@ -371,50 +313,14 @@ size_t adjust_alignment(size_t pages)
  */
 errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_t bytes,
                                       struct capref frame, size_t offset, int flags)
-{
-        printf("Invoke the paging_map_frame_attr_offset\n");
-
-    // Check if the size is aligned with the base page size
-    if (bytes % BASE_PAGE_SIZE != 0) {
-        printf("Error: bytes = %zu is not aligned with BASE_PAGE_SIZE = %zu\n", bytes, BASE_PAGE_SIZE);
-        return MM_ERR_BAD_ALIGNMENT;
-    }
-
-    // Step 1: Find or allocate a free virtual address range
-    errval_t err = paging_alloc(st, buf, bytes, BASE_PAGE_SIZE);  // Allocate free virtual address space
-    if (err_is_fail(err)) {
-        printf("Error: Failed to allocate virtual address range\n");
-        return err;
-    }
-
-    lvaddr_t vaddr = (lvaddr_t)*buf;  // The starting virtual address of the allocated range
-    printf("Allocated virtual address range starting at %p\n", (void*)vaddr);
-
-    // TODO: Add hashmap lookup logic to check if each level page table exists.
-    // If not, create the page table and update the hashmap.
-
-    // Repeat this process for L2 and L3 page tables.
-    // Ensure all required page tables for the specified virtual address range are created.
-
-    // Step 3: Map the frame at the free virtual address using vnode_map
-    printf("Mapping frame at virtual address %p\n", (void*)vaddr);
-    err = vnode_map(st->L3, frame, VMSAv8_64_L3_INDEX(vaddr), flags, offset, 1, st->root);
-    if (err_is_fail(err)) {
-        printf("Error: vnode_map failed (virtual address = %p)\n", (void*)vaddr);
-        return err_push(err, LIB_ERR_VNODE_MAP);
-    }
-    printf("Frame successfully mapped at virtual address %p\n", (void*)vaddr);
-
-    // Step 4: Update internal state
-    *buf = (void*)vaddr;  // Return the base virtual address of the mapped frame
-    st->current_vaddr += bytes;  // Update current_vaddr for next allocation
-
-    printf("Returning base virtual address %p\n", *buf);
-    printf("Updated current_vaddr to %p\n", (void*)st->current_vaddr);
-    printf("Exiting paging_map_frame_attr_offset successfully\n");
-
-    return SYS_ERR_OK;
-
+{   
+     // make compiler happy about unused parameters
+    (void)st;
+    (void)buf;
+    (void)bytes;
+    (void)frame;
+    (void)offset;
+    (void)flags;
     // TODO(M1):
     //  - decide on which virtual address to map the frame at
     //  - map the frame assuming all mappings will fit into one leaf page table (L3)  (fail otherwise)
@@ -431,12 +337,12 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
 
     paging_alloc(st, buf, bytes, BASE_PAGE_SIZE);
     
-    printf("Invoke the paging_map_frame_attr_offset\n");
-
-    // Check if the size is aligned with the base page size
-    if (bytes % BASE_PAGE_SIZE != 0) {
-        printf("Error: bytes = %zu is not aligned with BASE_PAGE_SIZE = %zu\n", bytes, BASE_PAGE_SIZE);
-        return MM_ERR_BAD_ALIGNMENT;
+    // This eager allocation works
+    genvaddr_t vaddr = (genvaddr_t)*buf;
+    errval_t err = paging_map_fixed_attr_offset(st, vaddr, frame, bytes, offset, flags);
+    if (err_is_fail(err)) {
+        printf("vnode_map failed: %s\n", err_getstring(err));
+        return -1;
     }
 
     return SYS_ERR_OK;
@@ -454,7 +360,6 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
     if (parent->children[slot] == NULL) {
         USER_PANIC("didn't allocate slab successsfully\n");
     }
-}
 
     slab_refill_check(&(st->slab_allocator));
     
@@ -499,34 +404,8 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
 errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, struct capref frame,
                                       size_t bytes, size_t offset, int flags)
 {
-    (void)st;
-    (void)vaddr;
-    (void)frame;
-    (void)bytes;
-    (void)offset;
-    (void)flags;
-    // make compiler happy about unused parameters
-    printf("Invoke the paging_map_fixed_attr_offset\n");
-    // step 1: check the availability of the vaddr
-    // bool content;
-    // // content = st->meta_pt->pgtb_entry[VMSAv8_64_L0_INDEX()]
-    // // step 2: map the frame
-    // printf("Allocating slot for mapping\n");
-    // struct capref mapping;
-    // errval_t err = st->slot_alloc->alloc(st->slot_alloc, &(mapping));
-    // if (err_is_fail(err)) {
-    //     printf("Error: Slot allocation failed\n");
-    //     return err_push(err, LIB_ERR_SLOT_ALLOC);
-    // }
-    // printf("Slot allocated successfully\n");
-    // // Map the frame at the found virtual address using vnode_map
-    // printf("Mapping frame at virtual address %p\n", target_vaddr);
-    // err = vnode_map(st->L3, frame, VMSAv8_64_L3_INDEX(vaddr), flags, offset, 1, mapping);
-    // if (err_is_fail(err)) {
-    //     printf("Error: vnode_map failed (virtual address = %p)\n", vaddr);
-    //     return err_push(err, LIB_ERR_VNODE_MAP);
-    // }
-    // printf("Frame successfully mapped at virtual address %p\n", vaddr);
+    errval_t result;
+    int pages_mapped;
 
     // Determine the total number of pages to map based on the provided bytes
     int total_pages = ROUND_UP(bytes, BASE_PAGE_SIZE) / BASE_PAGE_SIZE;

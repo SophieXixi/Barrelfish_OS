@@ -115,6 +115,8 @@ static void alloc_and_map_many(void)
         grading_printf("mapped frame %zu, checking for zeroes\n", n);
         for (size_t i = 0; i < FRAME_SIZE; i++) {
             if (((uint8_t *)buf)[i] != (uint8_t)n) {
+                grading_printf("Mismatch at byte %zu in frame %zu: expected %d, got %d\n",
+                       i, n, (uint8_t)n, ((uint8_t *)buf)[i]);
                 grading_test_fail("V1-2", "memory not set correctly\n");
                 return;
             }
