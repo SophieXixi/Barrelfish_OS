@@ -28,10 +28,6 @@
 static char stack_first[EXCEPTION_STACK_SIZE];
 
 static struct paging_state current;
-errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot, 
-                  uint64_t offset, uint64_t pte_ct, enum objtype type, struct page_table * parent); 
-void pf_handler(enum exception_type type, int subtype, void *addr, arch_registers_state_t *regs);
-void page_fault_handler(void *faulting_address);
 
 /**
  * @brief allocates a new page table for the given paging state with the given type
@@ -244,6 +240,34 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
     printf("Invoke the paging_alloc function\n");
     size_t aligned_bytes = ROUND_UP(bytes, alignment);
 
+    // Try to find a suitable free region
+    struct paging_region *prev = NULL;
+    struct paging_region *freeList = st->free_list;
+    while (freeList != NULL) {
+        if (freeList->region_size >= aligned_bytes) { // Found a suitable region
+            *buf = (void *)freeList->base_addr;
+
+            // Adjust the free list entry
+            if (freeList->region_size == aligned_bytes) {
+                // Exact match, remove the current region from the list
+                if (prev == NULL) {
+                    st->free_list = freeList->next;
+                } else {
+                    prev->next = freeList->next;
+                }
+                slab_free(&st->slab_allocator, freeList);
+            } else {
+                // Partial allocation, update the base address and size
+                freeList->base_addr += aligned_bytes;
+                freeList->region_size -= aligned_bytes;
+            }
+            return SYS_ERR_OK;
+        }
+        prev = freeList;
+        freeList = freeList->next;
+    }
+
+
     genvaddr_t vaddr = st->current_vaddr;
 
     // Reserve the virtual address space by incrementing current_vaddr
@@ -386,6 +410,7 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
     // Determine the total number of pages to map based on the provided bytes
     int total_pages = ROUND_UP(bytes, BASE_PAGE_SIZE) / BASE_PAGE_SIZE;
     int remaining_pages = total_pages;
+    lvaddr_t original_vaddr = vaddr;
 
     // Perform the mapping in chunks that fit within an L3 page table
     while (remaining_pages > 0) {
@@ -450,12 +475,29 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
             vaddr += BASE_PAGE_SIZE;
         }
 
-
         // Update the remaining pages count
         remaining_pages -= pages_mapped;
         printf("after mapping vaddr: %p\n", vaddr);
 
-        //remaining_pages--;
+        printf("Addin the mapped region to the mapped_list\n");
+
+        // Bookkeeping: Add the mapped region to the mapped_list
+        struct mapped_region *new_mapped = slab_alloc(&st->slab_allocator);
+        if (new_mapped == NULL) {
+            return LIB_ERR_SLAB_ALLOC_FAIL;
+        }
+
+        // Initialize the mapped_region fields
+        new_mapped->base_addr = original_vaddr;
+        new_mapped->region_size = bytes;
+        new_mapped->flags = flags;
+        new_mapped->frame_cap = frame;
+        new_mapped->offset = offset;
+        new_mapped->next = st->mapped_list; // Insert at the head of the list
+        new_mapped->mapping_cap = map_slot;
+        st->mapped_list = new_mapped;
+
+        printf("Mapped region [%p - %p] added to mapped_list\n", (void *)original_vaddr, (void *)(original_vaddr + bytes));
 
         // Check and refill the slab allocator if necessary
         result = slab_refill_check(&(st->slab_allocator));
@@ -528,6 +570,79 @@ void page_fault_handler(void *faulting_address)
 }
 
 
+/**
+ * @brief Adds a region to the free list in the paging state, maintaining the sorted order
+ *        by base address and merging adjacent regions if possible.
+ *
+ * @param[in] st           The paging state to add the region to.
+ * @param[in] base_addr    The base address of the region to add.
+ * @param[in] region_size  The size of the region to add.
+ *
+ * @return SYS_ERR_OK on success, or an error indicating failure.
+ */
+errval_t add_to_free_list(struct paging_state *st, lvaddr_t base_addr, size_t region_size) {
+    // Allocate a new region node using the slab allocator
+    struct paging_region *new_region = slab_alloc(&st->slab_allocator);
+    if (new_region == NULL) {
+        return LIB_ERR_SLAB_ALLOC_FAIL;
+    }
+
+    // Initialize the new region
+    new_region->base_addr = base_addr;
+    new_region->region_size = region_size;
+    new_region->next = NULL;
+
+    // Insert the new region into the free list, maintaining sorted order by base address
+    struct paging_region *prev = NULL;
+    struct paging_region *curr = st->free_list;
+
+    while (curr != NULL && curr->base_addr < new_region->base_addr) {
+        prev = curr;
+        curr = curr->next;
+    }
+
+    // Insert the new region between prev and curr
+    if (prev == NULL) {
+        // Insert at the head of the list
+        new_region->next = st->free_list;
+        st->free_list = new_region;
+    } else {
+        prev->next = new_region;
+        new_region->next = curr;
+    }
+
+    // Merge adjacent regions if possible to reduce fragmentation
+    merge_adjacent_regions(st);
+
+    return SYS_ERR_OK;
+}
+
+
+/**
+ * @brief Merges adjacent regions in the free list to reduce fragmentation.
+ *
+ * @param[in] st  The paging state containing the free list.
+ */
+void merge_adjacent_regions(struct paging_state *st) {
+    struct paging_region *curr = st->free_list;
+
+    while (curr != NULL && curr->next != NULL) {
+        // Check if the current region is adjacent to the next region
+        if (curr->base_addr + curr->region_size == curr->next->base_addr) {
+            // Merge the current region with the next one
+            curr->region_size += curr->next->region_size;
+
+            // Remove the next region from the list
+            struct paging_region *next = curr->next;
+            curr->next = next->next;
+            slab_free(&st->slab_allocator, next);
+        } else {
+            curr = curr->next;
+        }
+    }
+}
+
+
 
 
 /**
@@ -543,109 +658,46 @@ void page_fault_handler(void *faulting_address)
 errval_t paging_unmap(struct paging_state *st, const void *region) {
     printf("[paging_unmap] Invoked with region starting at: %p\n", region);
 
-    // Check if the paging state or region list is NULL
-    if (st == NULL || st->region_list == NULL) {
-        USER_PANIC("[paging_unmap] Error: paging_state or region_list is NULL\n");
-    }
+    struct mapped_region *prev = NULL;
+    struct mapped_region *curr = st->mapped_list;
 
-    struct paging_region *prev = NULL;
-    struct paging_region *curr = st->region_list;
-
-    // Step 1: Find the region associated with the address
-    printf("[paging_unmap] Searching for region in the list...\n");
+    // Step 1: Find the mapped region
     while (curr != NULL) {
-        printf("[paging_unmap] Checking region with base address: %p and size: %zu\n",
-               (void *)curr->base_addr, curr->region_size);
         if (curr->base_addr == (genvaddr_t)region) {
-            printf("[paging_unmap] Found matching region at address: %p\n", (void *)curr->base_addr);
             break;
         }
         prev = curr;
         curr = curr->next;
     }
 
-    // If no matching region is found, return an error
     if (curr == NULL) {
         printf("[paging_unmap] Error: Region not found for address: %p\n", region);
         return LIB_ERR_VSPACE_VREGION_NOT_FOUND;
     }
 
-    // Step 2: Unmap all pages in the region
-    genvaddr_t vaddr = curr->base_addr;
-    size_t remaining_bytes = curr->region_size;
-
-    printf("[paging_unmap] Unmapping region from virtual address: %p to %p\n", 
-           (void *)vaddr, (void *)(vaddr + remaining_bytes));
-
-    while (remaining_bytes > 0) {
-        int l0_idx = VMSAv8_64_L0_INDEX(vaddr);
-        int l1_idx = VMSAv8_64_L1_INDEX(vaddr);
-        int l2_idx = VMSAv8_64_L2_INDEX(vaddr);
-        int l3_idx = VMSAv8_64_L3_INDEX(vaddr);
-
-        printf("[paging_unmap] Current virtual address: %p\n", (void *)vaddr);
-        printf("[paging_unmap] Page table indices: L0=%d, L1=%d, L2=%d, L3=%d\n",
-               l0_idx, l1_idx, l2_idx, l3_idx);
-
-        // Check if page table entries exist for each level
-        if (st->root->children[l0_idx] == NULL) {
-            printf("[paging_unmap] Error: L0 page table not found\n");
-            return LIB_ERR_VSPACE_VREGION_NOT_FOUND;
-        }
-        if (st->root->children[l0_idx]->children[l1_idx] == NULL) {
-            printf("[paging_unmap] Error: L1 page table not found\n");
-            return LIB_ERR_VSPACE_VREGION_NOT_FOUND;
-        }
-        if (st->root->children[l0_idx]->children[l1_idx]->children[l2_idx] == NULL) {
-            printf("[paging_unmap] Error: L2 page table not found\n");
-            return LIB_ERR_VSPACE_VREGION_NOT_FOUND;
-        }
-        if (st->root->children[l0_idx]->children[l1_idx]->children[l2_idx]->children[l3_idx] == NULL) {
-            printf("[paging_unmap] Error: L3 page table entry not found\n");
-            return LIB_ERR_VSPACE_VREGION_NOT_FOUND;
-        }
-        
-        printf("!!!\n");
-        struct page_table *l3_table = st->root->children[l0_idx]->children[l1_idx]->children[l2_idx];
-        printf("!!!!\n");
-        // Step 3: Unmap the page
-        struct capref mapping_cap = l3_table->children[l3_idx]->mapping;  // Correct capref
-        printf("[paging_unmap] Unmapping vnode for L3 entry at index: %d\n", l3_idx);
-         printf("!!!!!\n");
-        errval_t err = vnode_unmap(l3_table->self, mapping_cap);  // Use mapping capref
-        if (err_is_fail(err)) {
-            printf("[paging_unmap] Error: Failed to unmap vnode at vaddr: %p, error: %s\n",
-                   (void *)vaddr, err_getstring(err));
-            return err_push(err, LIB_ERR_VNODE_UNMAP);  // Handle unmap failure
-        }
-
-        // Free the mapping and clear the entry
-        slab_free(&st->slab_allocator, l3_table->children[l3_idx]);
-        l3_table->children[l3_idx] = NULL;
-
-        printf("[paging_unmap] Successfully unmapped page at vaddr: %p\n", (void *)vaddr);
-
-        // Move to the next page
-        vaddr += BASE_PAGE_SIZE;
-        remaining_bytes -= BASE_PAGE_SIZE;
+    // Step 2: Unmap using the stored mapping capability
+    errval_t err = vnode_unmap(st->root->children[VMSAv8_64_L0_INDEX(curr->base_addr)]
+                               ->children[VMSAv8_64_L1_INDEX(curr->base_addr)]
+                               ->children[VMSAv8_64_L2_INDEX(curr->base_addr)]->self, 
+                               curr->mapping_cap);
+    if (err_is_fail(err)) {
+        printf("[paging_unmap] Error: Failed to unmap vnode: %s\n", err_getstring(err));
+        return err_push(err, LIB_ERR_VNODE_UNMAP);
     }
 
-    // Step 4: Free the region and update the region list
-    printf("[paging_unmap] Removing region from the region list\n");
+    // Step 3: Remove the region from the mapped_list
     if (prev == NULL) {
-        // The region to unmap is the first element in the list
-        st->region_list = curr->next;
-        printf("[paging_unmap] Region was the first element. Updated the head of the list.\n");
+        st->mapped_list = curr->next;
     } else {
-        // Skip over the current region
         prev->next = curr->next;
-        printf("[paging_unmap] Updated previous region to skip over the unmapped region.\n");
     }
 
-    // Free the region structure
+    // Free the mapped_region structure
     slab_free(&st->slab_allocator, curr);
-    printf("[paging_unmap] Freed region structure for address: %p\n", (void *)region);
+    printf("[paging_unmap] Freed mapped_region structure for address: %p\n", (void *)region);
 
-    printf("[paging_unmap] Successfully unmapped region starting at: %p\n", region);
+    // Add the unmapped region back to the free list
+    add_to_free_list(st, curr->base_addr, curr->region_size);
+
     return SYS_ERR_OK;
 }

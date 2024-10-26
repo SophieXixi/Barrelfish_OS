@@ -58,6 +58,16 @@ struct paging_region {
     struct paging_region *next;    ///< Next region in the linked list
 };
 
+struct mapped_region {
+    lvaddr_t base_addr;        ///< Base virtual address of the mapped region
+    size_t region_size;        ///< Size of the mapped region in bytes
+    paging_flags_t flags;      ///< Mapping flags (e.g., read, write, execute)
+    struct capref frame_cap;   ///< Capability reference to the mapped frame
+    size_t offset;             ///< Offset within the frame where the mapping starts
+     struct capref mapping_cap; 
+    struct mapped_region *next; ///< Pointer to the next mapped region in the linked list
+};
+
 
 struct page_table {
     struct page_table *parent;
@@ -76,8 +86,10 @@ struct paging_state {
     lvaddr_t start_vaddr;
     lvaddr_t current_vaddr;
     struct slab_allocator slab_allocator;
-    struct page_table * root;
+    struct page_table *root;
     struct paging_region *region_list;
+    struct paging_region *free_list;
+    struct mapped_region *mapped_list; 
     struct thread_mutex paging_mutex;
     struct thread_mutex heap_mutex;
 
