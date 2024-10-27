@@ -27,6 +27,12 @@
 #include <barrelfish_kpi/capabilities.h>
 #include <barrelfish_kpi/init.h> // for CNODE_SLOTS_*
 
+struct allocdBlock {
+    lvaddr_t vaddr;
+    size_t bytes;
+    struct allocdBlock * next;
+};
+
 struct morecore_state {
     struct thread_mutex mutex;
     Header header_base;
@@ -34,6 +40,7 @@ struct morecore_state {
     // for "real" morecore (lib/aos/morecore.c)
     // TODO: add some state here if needed.
     // for "static" morecore (see lib/aos/static_morecore.c)
+    struct allocdBlock * root;
     size_t alignment;
     
     char *freep;

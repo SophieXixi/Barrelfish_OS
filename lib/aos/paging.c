@@ -535,7 +535,7 @@ void page_fault_handler(void *faulting_address)
     }
 
     // No region found, handle the error
-    if (region == NULL) { 
+    if (region == NULL || region->type != PAGING_REGION_LAZY) { 
         USER_PANIC("Page fault occurred at an unmapped region: %p\n", faulting_address);
         return;
     }
@@ -550,7 +550,8 @@ void page_fault_handler(void *faulting_address)
     printf("Allocating and mapping frame for lazily allocated region\n");
 
     struct capref frame;
-    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL); // Allocate a frame
+  ;
+    err = frame_alloc(&frame, region->region_size, NULL); // Allocate a frame
     if (err_is_fail(err)) {
         USER_PANIC("Frame allocation failed: %s\n", err_getstring(err));
         return;
