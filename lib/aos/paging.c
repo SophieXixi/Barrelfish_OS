@@ -535,7 +535,7 @@ void page_fault_handler(void *faulting_address)
     }
 
     // No region found, handle the error
-    if (region == NULL) { 
+    if (region == NULL || region->type != PAGING_REGION_LAZY) { 
         USER_PANIC("Page fault occurred at an unmapped region: %p\n", faulting_address);
         return;
     }
@@ -550,7 +550,8 @@ void page_fault_handler(void *faulting_address)
     printf("Allocating and mapping frame for lazily allocated region\n");
 
     struct capref frame;
-    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL); // Allocate a frame
+  ;
+    err = frame_alloc(&frame, region->region_size, NULL); // Allocate a frame
     if (err_is_fail(err)) {
         USER_PANIC("Frame allocation failed: %s\n", err_getstring(err));
         return;
@@ -661,7 +662,7 @@ errval_t paging_unmap(struct paging_state *st, const void *region) {
     struct mapped_region *prev = NULL;
     struct mapped_region *curr = st->mapped_list;
 
-    // Step 1: Find the mapped region
+    // Find the mapped region
     while (curr != NULL) {
         if (curr->base_addr == (genvaddr_t)region) {
             break;
@@ -675,7 +676,13 @@ errval_t paging_unmap(struct paging_state *st, const void *region) {
         return LIB_ERR_VSPACE_VREGION_NOT_FOUND;
     }
 
-    // Step 2: Unmap using the stored mapping capability
+    // Check if the region has already been unmapped
+    if (curr->is_unmapped) {
+        printf("[paging_unmap] Warning: Region already unmapped: %p\n", region);
+        return SYS_ERR_OK; // Return success, as it's already unmapped
+    }
+
+    // Unmap using the stored mapping capability
     errval_t err = vnode_unmap(st->root->children[VMSAv8_64_L0_INDEX(curr->base_addr)]
                                ->children[VMSAv8_64_L1_INDEX(curr->base_addr)]
                                ->children[VMSAv8_64_L2_INDEX(curr->base_addr)]->self, 
@@ -685,7 +692,10 @@ errval_t paging_unmap(struct paging_state *st, const void *region) {
         return err_push(err, LIB_ERR_VNODE_UNMAP);
     }
 
-    // Step 3: Remove the region from the mapped_list
+    // Mark the region as unmapped
+    curr->is_unmapped = true;
+
+    // Remove the region from the mapped_list
     if (prev == NULL) {
         st->mapped_list = curr->next;
     } else {

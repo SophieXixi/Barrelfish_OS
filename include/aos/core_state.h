@@ -27,6 +27,12 @@
 #include <barrelfish_kpi/capabilities.h>
 #include <barrelfish_kpi/init.h> // for CNODE_SLOTS_*
 
+struct allocated_region {
+    void *base;               // Starting address of the allocated region
+    size_t size;              // Size of the allocated region
+    struct allocated_region *next;
+};
+
 struct morecore_state {
     struct thread_mutex mutex;
     Header header_base;
@@ -34,8 +40,14 @@ struct morecore_state {
     // for "real" morecore (lib/aos/morecore.c)
     // TODO: add some state here if needed.
     // for "static" morecore (see lib/aos/static_morecore.c)
+
+    // Added later
+    struct allocated_region *allocated_list;
     size_t alignment;
-    
+    struct slab_allocator slab_allocator;
+
+
+    // Original
     char *freep;
 };
 

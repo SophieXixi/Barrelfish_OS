@@ -64,7 +64,8 @@ struct mapped_region {
     paging_flags_t flags;      ///< Mapping flags (e.g., read, write, execute)
     struct capref frame_cap;   ///< Capability reference to the mapped frame
     size_t offset;             ///< Offset within the frame where the mapping starts
-     struct capref mapping_cap; 
+    struct capref mapping_cap; // Frame capability backing the memory
+    bool is_unmapped;       // Flag to indicate if the region is already unmapped
     struct mapped_region *next; ///< Pointer to the next mapped region in the linked list
 };
 
