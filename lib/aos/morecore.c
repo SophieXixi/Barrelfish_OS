@@ -134,22 +134,36 @@ errval_t morecore_init(size_t alignment)
  */
 static void *morecore_alloc(size_t bytes, size_t *retbytes)
 {
-    // make compiler happy about unused parameters
-    (void) retbytes;
-
     void *buf;
     struct morecore_state *state = get_morecore_state();
    
-    debug_printf("allocate a frame for inital heap\n");
+    debug_printf("Allocating a frame for initial heap\n");
     
     paging_alloc(get_current_paging_state(), &buf, bytes, state->alignment);
 
-    debug_printf("map the inital heap\n");
-    ///paging_map_frame_attr_offset(get_current_paging_state(), &buf, bytes, capref,0, VREGION_FLAGS_READ_WRITE);
-    
-    debug_printf("initalize the free pointer with the start of the heap");
-    state->freep = (char*) buf;
-    
+    if (buf == NULL) {
+        *retbytes = 0;
+        return NULL;
+    }
+
+    *retbytes = bytes;
+
+    // Track the newly allocated region
+    struct allocated_region *new_region = slab_alloc(&state->slab_allocator);
+    if (new_region == NULL) {
+        // Allocation tracking failed, free the memory
+        paging_unmap(get_current_paging_state(), buf);
+        *retbytes = 0;
+        return NULL;
+    }
+
+    new_region->base = buf;
+    new_region->size = bytes;
+    new_region->next = state->allocated_list;
+    state->allocated_list = new_region;
+
+    debug_printf("Allocated and tracked memory region [%p - %p]\n", buf, (char *)buf + bytes);
+
     return buf;
 }
 
@@ -161,11 +175,50 @@ static void *morecore_alloc(size_t bytes, size_t *retbytes)
  */
 static void morecore_free(void *base, size_t bytes)
 {
-    // make compiler happy about unused parameters
-    (void)base;
-    (void)bytes;
+    struct morecore_state *state = get_morecore_state();
+    struct allocated_region *prev = NULL;
+    struct allocated_region *curr = state->allocated_list;
 
-    USER_PANIC("NYI: implement me\n");
+    // Find the allocated region in the list
+    while (curr != NULL) {
+        if (curr->base == base && curr->size == bytes) {
+            break;
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+
+    // If the region is not found, panic
+    if (curr == NULL) {
+        USER_PANIC("Attempted to free unallocated or mismatched region: %p\n", base);
+        return;
+    }
+
+    // Unmap the memory region
+    errval_t err = paging_unmap(get_current_paging_state(), base);
+    if (err_is_fail(err)) {
+        USER_PANIC("Failed to unmap memory: %s\n", err_getstring(err));
+        return;
+    }
+
+    // Add the freed memory back to the free list
+    err = add_to_free_list(get_current_paging_state(), (lvaddr_t)base, bytes);
+    if (err_is_fail(err)) {
+        USER_PANIC("Failed to add freed region back to free list\n");
+        return;
+    }
+
+    // Remove the region from the allocated list
+    if (prev == NULL) {
+        state->allocated_list = curr->next;
+    } else {
+        prev->next = curr->next;
+    }
+
+    // Free the allocated_region structure
+    slab_free(&state->slab_allocator, curr);
+
+    debug_printf("Successfully freed memory region [%p - %p]\n", base, (char *)base + bytes);
 }
 
 /**
@@ -185,8 +238,12 @@ errval_t morecore_init(size_t alignment)
 
     thread_mutex_init(&state->mutex);
 
+    static char initial_slab_buffer[100 * 20480];
+    slab_init(&state->slab_allocator, sizeof(struct page_table), NULL);
+    slab_grow(&state->slab_allocator, initial_slab_buffer, sizeof(initial_slab_buffer));
+
     state->alignment = alignment;
-    
+    state->allocated_list = NULL;
 
     sys_morecore_alloc = morecore_alloc;
     sys_morecore_free = morecore_free;

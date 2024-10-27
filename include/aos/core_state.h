@@ -27,10 +27,10 @@
 #include <barrelfish_kpi/capabilities.h>
 #include <barrelfish_kpi/init.h> // for CNODE_SLOTS_*
 
-struct allocdBlock {
-    lvaddr_t vaddr;
-    size_t bytes;
-    struct allocdBlock * next;
+struct allocated_region {
+    void *base;               // Starting address of the allocated region
+    size_t size;              // Size of the allocated region
+    struct allocated_region *next;
 };
 
 struct morecore_state {
@@ -40,9 +40,14 @@ struct morecore_state {
     // for "real" morecore (lib/aos/morecore.c)
     // TODO: add some state here if needed.
     // for "static" morecore (see lib/aos/static_morecore.c)
-    struct allocdBlock * root;
+
+    // Added later
+    struct allocated_region *allocated_list;
     size_t alignment;
-    
+    struct slab_allocator slab_allocator;
+
+
+    // Original
     char *freep;
 };
 
