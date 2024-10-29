@@ -103,4 +103,3 @@ errval_t elfimg_unmap(struct elfimg *img)
     img->buf = NULL;
     return SYS_ERR_OK;
 }
-

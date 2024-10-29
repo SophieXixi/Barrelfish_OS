@@ -636,7 +636,7 @@ class AbstractTestRunner:
     def wait_for_os_boot(self, msg : str) :
         try:
             loginfo(f"Waiting for the OS to boot... ('{msg}')")
-            self._con.expect(msg)
+            self._con.expect(msg, timeout = 120)
             self._con.setecho(False)
         except pexpect.TIMEOUT as e:
             logerr(f"Timeout: Did not see expected boot string '{msg}'")

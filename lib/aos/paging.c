@@ -366,6 +366,7 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
     struct capref mapping;
     err = st->slot_alloc->alloc(st->slot_alloc, &mapping);
     if (err_is_fail(err)) {
+        //DEBUG_PRINTF(err_getstring(err));
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
     pt_alloc(st, type, &(parent->children[slot]->self));

@@ -153,7 +153,10 @@ static errval_t initialize_spawn_info(struct spawninfo *si, const char *binary_n
 static errval_t setup_child_cspace(struct spawninfo *si);
 // static errval_t populate_task_cnode(struct cnoderef task_cnode, struct spawninfo *si);
 static errval_t initialize_child_vspace(struct spawninfo *si);
+
 // static errval_t setup_dispatcher(struct spawninfo *si);
+
+
 
 
 errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc,
