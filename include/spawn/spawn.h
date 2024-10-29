@@ -42,16 +42,6 @@ typedef enum spawnstate {
 } spawn_state_t;
 
 
-/**
- * @brief structure to keep track track of the spawned process
- *
- * Hint: this structure is intended to keep track of the resources that were allocated
- * during the spawning of the process, and keep track of the state of the process throughout
- * its lifetime.
- *
- * Hint: the fields in this structure are suggestions of what you might want to keep track of,
- * but this structure is far from complete.
- */
 struct spawninfo {
     /// name of the binary this process runs
     char *binary_name;
@@ -68,10 +58,28 @@ struct spawninfo {
     /// exit code of this process, or zero if it hasn't exited yet
     int exitcode;
 
-    // TODO(M3): Add fields you need to store state
-    //           when spawning a new dispatcher,
-    //           e.g. references to the child's
-    //           capabilities or paging state
+    // MAPPING ELF TOOLS
+    struct frame_identity child_frame_id;
+    lvaddr_t mapped_elf;
+    genvaddr_t entry_addr;              ///< Program entry point
+
+
+    // L1 CNODE REPRESENTING CSPACE
+    struct cnoderef l1_cnode;
+    struct capref l1_cap;
+    struct cnoderef l2_cnodes[ROOTCN_SLOTS_USER];
+
+
+    // VSPACE STUFF
+    struct capref l1pagetable;
+    struct capref child_pagetable;
+    struct paging_state *paging_state;
+
+
+    /// list of children processes (if this process spawns children)
+    struct spawninfo **children;
+    size_t num_children;
+
 };
 
 
@@ -109,6 +117,8 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
  */
 errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc,
                               const char *argv[], int capc, struct capref caps[], domainid_t pid);
+
+errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_t flags, void **ret);
 
 /**
  * @brief constructs a new process by loading the image from the provided module

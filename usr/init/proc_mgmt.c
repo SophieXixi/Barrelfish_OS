@@ -27,8 +27,11 @@
 
 #include "proc_mgmt.h"
 
+
+
 extern struct bootinfo *bi;
 extern coreid_t         my_core_id;
+struct process_manager *proc_manager;
 
 
 
@@ -120,6 +123,18 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
+/**
+ * @brief function to allocate a unique PID for each process
+ */
+domainid_t allocate_pid(struct process_manager *manager) {
+    if (manager->next_pid == 0) {
+        // Avoid returning 0 as a PID, which may represent an invalid state
+        manager->next_pid++;
+    }
+    return manager->next_pid++;
+}
+
+
 
 /**
  * @brief spawns a new process with the given commandline arguments on the given core
@@ -132,24 +147,55 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
  *
  * Note: this function should replace the default commandline arguments the program.
  */
-errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domainid_t *pid)
-{
-    // make compiler happy about unused parameters
-    (void)cmdline;
+errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domainid_t *pid) {
     (void)core;
-    (void)pid;
+    // Find the image in multiboot
+    struct mem_region *module = multiboot_find_module(bi, cmdline);
+    if (module == NULL) {
+        debug_printf("Error: Module not found for %s\n", cmdline);
+        return SPAWN_ERR_FIND_MODULE;
+    }
+    printf("Module found for %s at base address: 0x%lx\n", cmdline, module->mr_base);
 
-    // TODO:
+        // Allocate a PID
+    // domainid_t new_pid = allocate_pid(proc_manager);
+    // if (new_pid == 0) {
+    //     debug_printf("Error: PID allocation failed, out of PIDs\n");
+    //     return SPAWN_ERR_OUT_OF_PIDS;
+    // }
+    // *pid = new_pid;
+    // printf("Allocated PID: %u\n", new_pid);
+
+
+    // Initialize `spawninfo` structure
+    struct spawninfo si;
+    printf("si initialized");
+   
+
+    // Call spawn_load_with_bootinfo to load the process
+    printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
+    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline, *pid);
+    if (err_is_fail(err)) {
+        debug_printf("Error loading process: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("Process loaded successfully for PID %u\n", *pid);
+
+
+    // Optional: Update proc_manager with the new process
+    // Ensure memory for `processes` array is allocated or reallocated
+    // and add `&si` to `proc_manager->processes`
+
     //  - find the image
     //  - allocate a PID
     //  - use the spawn library to construct a new process
     //  - start the new process
     //  - keep track of the spawned process
-    // HINT: you may call proc_mgmt_spawn_with_caps with some preparation
-    // Note: With multicore support, you many need to send a message to the other core
-    USER_PANIC("functionality not implemented\n");
-    return LIB_ERR_NOT_IMPLEMENTED;
+
+
+    return SYS_ERR_OK;
 }
+
 
 
 /**

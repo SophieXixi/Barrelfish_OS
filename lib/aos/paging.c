@@ -71,7 +71,7 @@ static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capr
     return SYS_ERR_OK;
 }
 
-__attribute__((unused)) static errval_t pt_alloc_l1(struct paging_state *st, struct capref *ret)
+__attribute__((unused)) errval_t pt_alloc_l1(struct paging_state *st, struct capref *ret)
 {
     return pt_alloc(st, ObjType_VNode_AARCH64_l1, ret);
 }
@@ -354,8 +354,6 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
     err = st->slot_alloc->alloc(st->slot_alloc, &mapping);
     if (err_is_fail(err)) {
         //DEBUG_PRINTF(err_getstring(err));
-
-
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
     pt_alloc(st, type, &(parent->children[slot]->self));

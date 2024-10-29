@@ -35,6 +35,9 @@ __BEGIN_DECLS
  */
 
 
+
+
+
 /**
  * @brief spawns a new process with the given arguments and capabilities on the given core.
  *
@@ -128,6 +131,14 @@ struct proc_status {
 };
 
 
+struct process_manager {
+    struct proc_status **processes; // Dynamic array for multiple processes
+    size_t num_processes;        // Number of active processes
+    domainid_t next_pid; // Next available PID for a new process
+};
+
+
+
 /**
  * @brief obtains the statuses of running processes from the process manager
  *
@@ -191,6 +202,7 @@ static inline domainid_t proc_mgmt_get_self_pid(void)
  */
 errval_t proc_mgmt_get_status(domainid_t pid, struct proc_status *status);
 
+domainid_t allocate_pid(struct process_manager *manager);
 
 /**
  * @brief obtains the name of a process with the given PID
