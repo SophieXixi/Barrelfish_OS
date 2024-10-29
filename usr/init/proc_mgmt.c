@@ -543,4 +543,3 @@ errval_t proc_mgmt_killall(const char *name)
     //  - M4: notify its waiting processes
     return LIB_ERR_NOT_IMPLEMENTED;
 }
-
