@@ -790,20 +790,27 @@ errval_t dispatcher_create(struct capref dest)
 
     struct capref ram;
     assert(1 << log2ceil(OBJSIZE_DISPATCHER) == OBJSIZE_DISPATCHER);
+    printf("finished DISPATCH FUNCTION");
+
     err = ram_alloc(&ram, OBJSIZE_DISPATCHER);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RAM_ALLOC);
     }
+    printf("finished DISPATCH FUNCTION");
+  
 
     err = cap_retype(dest, ram, 0, ObjType_Dispatcher, 0);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CAP_RETYPE);
     }
+    printf("finished DISPATCH FUNCTION");
+
 
     err = cap_destroy(ram);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CAP_DESTROY);
     }
+    printf("finished DISPATCH FUNCTION");
     return SYS_ERR_OK;
 }
 

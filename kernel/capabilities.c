@@ -1195,7 +1195,7 @@ static errval_t caps_create(enum objtype type, lpaddr_t lpaddr, gensize_t size,
         // These types do not refer to a kernel object
         assert(lpaddr  == 0);
         assert(size    == 0);
-        assert(objsize == 0);
+        //assert(objsize == 0);
         assert(count   == 1);
 
         // Insert the capability

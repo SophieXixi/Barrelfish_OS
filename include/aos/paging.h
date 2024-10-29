@@ -34,6 +34,8 @@ void merge_adjacent_regions(struct paging_state *st);
 // Forward decl
 static inline errval_t frame_identify(struct capref frame, struct frame_identity *ret);
 
+errval_t pt_alloc_l1(struct paging_state *st, struct capref *ret);
+
 
 /**
  * @brief initializes the virtual memory system, and sets up self-paging

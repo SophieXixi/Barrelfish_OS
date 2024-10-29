@@ -65,7 +65,7 @@ static errval_t pt_alloc(struct paging_state *st, enum objtype type, struct capr
     return SYS_ERR_OK;
 }
 
-__attribute__((unused)) static errval_t pt_alloc_l1(struct paging_state *st, struct capref *ret)
+__attribute__((unused)) errval_t pt_alloc_l1(struct paging_state *st, struct capref *ret)
 {
     return pt_alloc(st, ObjType_VNode_AARCH64_l1, ret);
 }
