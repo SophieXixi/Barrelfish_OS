@@ -20,15 +20,19 @@
  */
 void elfimg_init_from_module(struct elfimg *img, struct mem_region *module)
 {
-    // make compiler happy about unused parameters
-    (void)img;
-    (void)module;
+    // Step 1: Create a capability reference for the module
+    struct capref module_cap = {
+        .cnode = cnode_module,
+        .slot = module->mrmod_slot
+    };
 
-    // TODO:
-    //   - construct the capability reference
-    //   - obtain the size of the module
-    //   - initialize the elfimg structure by calling `elfimg_init_with_cap()`
-    USER_PANIC("Not implemented");
+    // Step 2: Get the module size
+    size_t module_size = module->mrmod_size;
+
+    // Step 3: Initialize the elfimg structure with the module capability
+    elfimg_init_with_cap(img, module_cap, module_size);
+
+    printf("ELF image initialized with module size: %zu bytes\n", module_size);
 }
 
 
@@ -99,3 +103,5 @@ errval_t elfimg_unmap(struct elfimg *img)
     img->buf = NULL;
     return SYS_ERR_OK;
 }
+
+
