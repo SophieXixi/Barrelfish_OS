@@ -227,6 +227,7 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr,
 static inline errval_t paging_map_fixed_attr(struct paging_state *st, lvaddr_t vaddr,
                                              struct capref frame, size_t bytes, int flags)
 {
+    printf("RUNNING FIXED ATTR FUNCITON");
     return paging_map_fixed_attr_offset(st, vaddr, frame, bytes, 0, flags);
 }
 

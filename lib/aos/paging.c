@@ -80,6 +80,21 @@ __attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state *st, str
     return pt_alloc(st, ObjType_VNode_AARCH64_l3, ret);
 }
 
+/**
+ * @brief initializes the paging state struct for a foreign process when spawning a new one
+ *
+ * @param[in] st           the paging state to be initialized
+ * @param[in] start_vaddr  start virtual address to be managed
+ * @param[in] root         capability to the root leve page table
+ * @param[in] ca           the slot allocator instance to be used
+ *
+ * @return SYS_ERR_OK on success, or LIB_ERR_* on failure
+ */
+// errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr,
+//                                    struct capref pdir, struct slot_allocator *ca) 
+//     {
+//     }
+
 
 /**
  * @brief Initializes the paging state struct for the current process.
@@ -321,6 +336,7 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
     (void)frame;
     (void)offset;
     (void)flags;
+    printf("FINISHED frame attr FUNXTION");
     // TODO(M1):
     //  - decide on which virtual address to map the frame at
     //  - map the frame assuming all mappings will fit into one leaf page table (L3)  (fail otherwise)
@@ -351,32 +367,30 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
 errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot, 
                   uint64_t offset, uint64_t pte_ct, enum objtype type, struct page_table * parent) {
     errval_t err;
+    struct capref mapping;
 
-    debug_printf("invoke alloctae_new_pagetable\n");
+    debug_printf("Allocating new page table: Type=%d, Slot=%llu\n", type, slot);
+
     slab_refill_check(&(st->slab_allocator));
-
-    // Allocate a new page table using the slab allocato
+    // Allocate a new page table from the slab allocator.
     parent->children[slot] = (struct page_table*)slab_alloc(&(st->slab_allocator));
     if (parent->children[slot] == NULL) {
-        USER_PANIC("didn't allocate slab successsfully\n");
+        USER_PANIC("Failed to allocate page table from slab\n");
     }
 
-    slab_refill_check(&(st->slab_allocator));
-    
-    struct capref mapping;
     err = st->slot_alloc->alloc(st->slot_alloc, &mapping);
     if (err_is_fail(err)) {
-        //DEBUG_PRINTF(err_getstring(err));
         return err_push(err, LIB_ERR_SLOT_ALLOC);
     }
+
     pt_alloc(st, type, &(parent->children[slot]->self));
 
-    
-    err = vnode_map(parent->self, parent->children[slot]->self, 
-                    slot, VREGION_FLAGS_READ_WRITE, offset, pte_ct, mapping);
+
+    // Now, proceed with the mapping.
+    err = vnode_map(parent->self, parent->children[slot]->self, slot, VREGION_FLAGS_READ_WRITE, offset, pte_ct, mapping);
     if (err_is_fail(err)) {
-        printf("     vnode_map failed mapping: %s\n", err_getstring(err));
-        return -1;
+        debug_printf("vnode_map failed: %s\n", err_getstring(err));
+        return err;
     }
 
     // Initialize the newly allocated page table
@@ -384,6 +398,7 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
         parent->children[slot]->children[i] = NULL;
     }
 
+    debug_printf("Page table setup completed successfully.\n");
     return SYS_ERR_OK;
 }
 
@@ -404,7 +419,9 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
  */
 errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, struct capref frame,
                                       size_t bytes, size_t offset, int flags)
-{
+{    
+    printf("vaddr at start of function: 0x%lx\n", vaddr);
+
     errval_t result;
     int pages_mapped;
 
@@ -415,6 +432,7 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
 
     // Perform the mapping in chunks that fit within an L3 page table
     while (remaining_pages > 0) {
+        printf("ITERATION FIXED");
         // Calculate page table indices for the current virtual address
         int l0_idx = VMSAv8_64_L0_INDEX(vaddr);
         int l1_idx = VMSAv8_64_L1_INDEX(vaddr);
@@ -423,12 +441,15 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
 
         // Allocate and initialize a new L1 page table if necessary
         if (st->root->children[l0_idx] == NULL) {
+            printf("L1 pagetable allocated, checking state of st->root->children[%d]: %p\n", l0_idx, st->root->children[l0_idx]);
             result = allocate_new_pagetable(st, l0_idx, 0, 1, ObjType_VNode_AARCH64_l1, st->root);
             // result = pt_alloc_l1();
+            printf("L1 pagetable allocated, checking state of st->root->children[%d]: %p\n", l0_idx, st->root->children[l0_idx]);
             if (err_is_fail(result)) {
                 printf("Error allocating L1 pagetable: %s\n", err_getstring(result));
                 return result;
             }
+
         }
 
         // Allocate and initialize a new L2 page table if necessary
@@ -461,8 +482,9 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
 
         // Map the maximum number of pages that can fit into the L3 page table
         pages_mapped = MIN((int)(NUM_PT_SLOTS - l3_idx), remaining_pages);
+        debug_printf("Number of pages mapped: %d", pages_mapped);
         result = vnode_map(st->root->children[l0_idx]->children[l1_idx]->children[l2_idx]->self, 
-                           frame, l3_idx, flags, offset + (BASE_PAGE_SIZE * (total_pages - remaining_pages)), 
+                           frame, VMSAv8_64_L3_INDEX(vaddr), flags, offset + (BASE_PAGE_SIZE * (total_pages - remaining_pages)), 
                            pages_mapped, map_slot);
         if (err_is_fail(result)) {
             printf("vnode_map failed during leaf node mapping: %s\n", err_getstring(result));
@@ -507,7 +529,7 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
             return LIB_ERR_SLAB_REFILL;
         }
     }
-
+    printf("FINISHED FIXED FUNXTION");
     return SYS_ERR_OK;
 }
 

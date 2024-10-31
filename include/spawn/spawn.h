@@ -65,18 +65,23 @@ struct spawninfo {
 
 
     // L1 CNODE REPRESENTING CSPACE
-    struct cnoderef l1_cnode;
     struct capref l1_cap;
+    struct cnoderef l1_cnode;
     struct cnoderef l2_cnodes[ROOTCN_SLOTS_USER];
 
-
     // VSPACE STUFF
-    struct capref l1pagetable;
-    struct capref child_pagetable;
+    struct capref l0pagetable;
+    struct capref childl0_pagetable;
     struct paging_state *paging_state;
 
+    // DISPATCHER STUFF:
+    struct capref dispatcher_frame_cap;
+    dispatcher_handle_t dispatcher_handle;
+    struct capref dispatcher_cap;
+    arch_registers_state_t* area_enabled;
+    coreid_t core_id;
 
-    /// list of children processes (if this process spawns children)
+    // list of children processes (if this process spawns children)
     struct spawninfo **children;
     size_t num_children;
 
