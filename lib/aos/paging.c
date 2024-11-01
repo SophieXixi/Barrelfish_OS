@@ -542,6 +542,10 @@ void page_fault_handler(void *faulting_address)
     printf("Page fault occurred at address: %p\n", (void*)faulting_address);
 
     struct paging_state *st = get_current_paging_state();
+    printf("[paging_state] Current Paging State:\n");
+    printf("  start_vaddr: %p\n", (void *)st->start_vaddr);
+    printf("  current_vaddr: %p\n", (void *)st->current_vaddr);
+
 
     // Convert the faulting address to `lvaddr_t`
     lvaddr_t aligned_faulting_address = (lvaddr_t)faulting_address & ~(BASE_PAGE_SIZE - 1); // Align address

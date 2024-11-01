@@ -105,6 +105,7 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
 
     si->child_frame_id = child_frame_id;
     si->mapped_elf = mapped_elf;
+    si->module = module;
 
 
     // - create the elfimg struct from the module
@@ -192,8 +193,8 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     (void)img;
 
     // Step 4: Load the ELF image into the child's VSpace
-    err = elf_load(EM_AARCH64, allocate_child_frame, (void *) si->paging_state, si->mapped_elf,
-                   si->child_frame_id.bytes, &si->entry_addr);
+    err = elf_load(EM_AARCH64, allocate_child_frame, si->paging_state, si->mapped_elf,
+                   si->module->mrmod_size, &si->entry_addr);
     printf("LOADED THE ELF 1");
     if (err_is_fail(err)) {
         debug_printf("Failed to load ELF: %s\n", err_getstring(err));
@@ -295,21 +296,38 @@ static errval_t setup_child_cspace(struct spawninfo *si)
 static errval_t initialize_child_vspace(struct spawninfo *si)
 {
     errval_t err;
-    //struct paging_state *parent_paging_state = get_current_paging_state();
+
+    // Allocate the child paging state structure
     struct paging_state *child_paging_state = malloc(sizeof(struct paging_state));
     if (!child_paging_state) {
         debug_printf("Failed to allocate memory for child paging state\n");
         return LIB_ERR_MALLOC_FAIL;
     }
     
-    
-    slot_alloc(&si->l0pagetable); 
+    // Allocate a slot for the L0 page table in the parent's CSpace
+    err = slot_alloc(&si->l0pagetable); 
+    if (err_is_fail(err)) {
+        debug_printf("Failed to allocate slot for L0 page table: %s\n", err_getstring(err));
+        return err;
+    }
+
+    // Create the L0 page table
     err = vnode_create(si->l0pagetable, ObjType_VNode_AARCH64_l0);
     if (err_is_fail(err)) {
         debug_printf("Failed to allocate L0 page table in parent's CSpace: %s\n", err_getstring(err));
         return err;
     }
-    printf("L0 page table created in parent\n");
+    printf("L0 page table created in parent's CSpace\n");
+
+    // Initialize the child paging state with the L0 page table capability
+    err = paging_init_state(child_paging_state, VADDR_OFFSET, si->l0pagetable, get_default_slot_allocator());
+    if (err_is_fail(err)) {
+        debug_printf("Failed to initialize child paging state: %s\n", err_getstring(err));
+        free(child_paging_state); // Clean up allocated memory on failure
+        return err;
+    }
+    printf("Child paging state initialized successfully\n");
+
 
     // Copy the L0 page table capability to the child’s CSpace
     struct capref child_l0_pt = {
@@ -317,44 +335,23 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
         .slot = PAGECN_SLOT_VROOT
     };
 
-
-    // Initialize the child paging state with the L0 page table capability
-    err = paging_init_state(child_paging_state, VADDR_OFFSET, si->l0pagetable, get_default_slot_allocator());
-    if (err_is_fail(err)) {
-        debug_printf("Failed to initialize child paging state: %s\n", err_getstring(err));
-        return err;
-    }
-    printf("Child paging state initialized\n");
-
     err = cap_copy(child_l0_pt, si->l0pagetable);
     if (err_is_fail(err)) {
-        debug_printf("Failed to copy L1 page table capability to child's CSpace: %s\n", err_getstring(err));
+        debug_printf("Failed to copy L0 page table capability to child's CSpace: %s\n", err_getstring(err));
         return err;
     }
+    printf("L0 page table copied to child's CSpace\n");
 
-    struct paging_state *current_si = get_current_paging_state();
     si->childl0_pagetable = child_l0_pt;
     si->paging_state = child_paging_state;
-    printf("Current Paging State:\n");
-    printf("Start VAddr: %p\n", (void *)current_si->start_vaddr);
-    printf("Current VAddr: %p\n", (void *)current_si->current_vaddr);
-    printf("Root Table Cap: %d, %d\n", current_si->root->cap.cnode, current_si->root->cap.slot);
 
-    // Assuming `si->childl0_pagetable` is already set up and refers to the L0 pagetable of the child
-    // printf("Child Paging State:\n");
-    // printf("Start VAddr: %p\n", si-childl0_pagetable->start_vaddr);
-    // printf("Current VAddr: %p\n", (void *)si->childl0_pagetable->current_vaddr);
-    // printf("Root Table Cap: %d, %d\n", si->childl0_pagetable->root->cap.cnode, si->childl0_pagetable->root->cap.slot);
-
-    printf("L0 Page Table Cap: %d, %d\n", si->childl0_pagetable.cnode, si->childl0_pagetable.slot);
-
-    printf("L1 page table copied to child's CSpace\n");
     return SYS_ERR_OK;
 }
 
 // allocate function for elf
 // allocate function for elf
 errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_t flags, void **ret) {
+    (void)flags;
     size_t offset = BASE_PAGE_OFFSET(base);
     base -= offset;
     size = ROUND_UP(size + offset, BASE_PAGE_SIZE);
@@ -363,16 +360,17 @@ errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_
     size_t sizeholder;
     frame_alloc(&frame, size, &sizeholder);
 
-
-    paging_map_fixed_attr(state, base, frame, size, flags);
+    paging_alloc(state, ret, size, BASE_PAGE_SIZE);
+    //paging_map_fixed_attr(state, base, frame, size, flags);
     printf("MAPPED CHILD SPACE ELF");
     
-    paging_map_frame(get_current_paging_state(),ret,size,frame);
+    //paging_map_frame(get_current_paging_state(),ret,size,frame);
+    paging_alloc(get_current_paging_state(), ret, size, BASE_PAGE_SIZE);
     printf("MAPPED PARENT SPACE ELF");
     *ret += offset;
 
-    
     printf("ret (mapped address): %p\n", *ret);
+
     printf("Offset (alignment difference): %lu\n", offset);
 
     return SYS_ERR_OK; 

@@ -361,6 +361,7 @@ static inline errval_t vnode_map(struct capref dest, struct capref src, capaddr_
                                  uint64_t attr, uint64_t off, uint64_t pte_count,
                                  struct capref mapping)
 {
+    printf("get_croot_addr(dest): 0x%lx, CPTR_ROOTCN: 0x%lx\n", get_croot_addr(dest), CPTR_ROOTCN);
     assert(get_croot_addr(dest) == CPTR_ROOTCN);
 
     capaddr_t       sroot  = get_croot_addr(src);

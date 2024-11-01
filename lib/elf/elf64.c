@@ -580,13 +580,17 @@ errval_t elf64_load(uint16_t em_machine, elf_allocator_fn allocate_func,
             if (err_is_fail(err)) {
                 return err_push(err, ELF_ERR_ALLOCATE);
             }
+
             assert(dest != NULL);
             printf("COPYING FILE SEGMENT");
+            printf("mem size: %d, file size: %d\n", p->p_memsz, p->p_filesz);
             // Copy file segment into memory
             printf("dest: %p, source: %p, size: %zu\n", dest, (void *)(base + (uintptr_t)p->p_offset), p->p_filesz);
+            printf("P offest: %d\n", p->p_offset);
             memcpy(dest, (void *)(base + (uintptr_t)p->p_offset), p->p_filesz);
 
             printf("COPYING REST OF FILE SEGMENT");
+            printf("mem size: %d, file size: %d\n", p->p_memsz, p->p_filesz);
             // Initialize rest of memory segment (ie. BSS) with all zeroes
             memset((char *)dest + p->p_filesz, 0, p->p_memsz - p->p_filesz);
 

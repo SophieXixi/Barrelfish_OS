@@ -61,7 +61,8 @@ struct spawninfo {
     // MAPPING ELF TOOLS
     struct frame_identity child_frame_id;
     lvaddr_t mapped_elf;
-    genvaddr_t entry_addr;              ///< Program entry point
+    genvaddr_t entry_addr;
+    struct mem_region *module;              ///< Program entry point
 
 
     // L1 CNODE REPRESENTING CSPACE

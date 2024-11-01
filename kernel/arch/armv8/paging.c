@@ -574,6 +574,11 @@ caps_map_l3(struct capability* dest,
                         (uintptr_t)dest_lvaddr, slot + i);
         }
     }
+    uint64_t start_vaddr = dest_lvaddr + (slot * BASE_PAGE_SIZE);
+    uint64_t end_vaddr = start_vaddr + (pte_count * BASE_PAGE_SIZE) - 1;
+
+    printf("Mapping %zu pages from virtual address 0x%lx to 0x%lx\n", pte_count, start_vaddr, end_vaddr);
+
 
     lpaddr_t src_lpaddr = gen_phys_to_local_phys(get_address(src) + offset);
     if ((src_lpaddr & (BASE_PAGE_SIZE - 1))) {
