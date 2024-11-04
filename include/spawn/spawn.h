@@ -72,11 +72,14 @@ struct spawninfo {
     struct capref selfep_cap;
     struct capref argspage_cap;
     struct capref earlymem_cap;
+    struct capref pagecn_cap;
+
 
     // VSPACE STUFF
     struct capref l0pagetable;
     struct capref childl0_pagetable;
     struct paging_state *paging_state;
+    struct single_slot_allocator single_slot_alloc;
 
     // DISPATCHER STUFF:
     dispatcher_handle_t disp;

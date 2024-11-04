@@ -371,6 +371,11 @@ static errval_t setup_child_cspace(struct spawninfo *si)
         return err;
     }
 
+    si->pagecn_cap = (struct capref){
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_PAGECN
+    };
+
     printf("CSPACE setup for child completed.\n");
     return SYS_ERR_OK;
 }
@@ -379,38 +384,39 @@ static errval_t setup_child_cspace(struct spawninfo *si)
 static errval_t initialize_child_vspace(struct spawninfo *si)
 {   
     (void)si;
-    errval_t err;
-    // Step 1: Create the child’s L0 page table in its VSpace
+
     struct capref l0_pagetable_cap;
-    err = slot_alloc(&l0_pagetable_cap);  // Allocate a slot in the parent CSpace
+    errval_t err = slot_alloc(&l0_pagetable_cap);  // Allocate a slot in the parent CSpace
     if (err_is_fail(err)) {
         debug_printf("Failed to allocate slot for L0 page table: %s\n", err_getstring(err));
         return err;
     }
-    err = vnode_create(l0_pagetable_cap, ObjType_VNode_AARCH64_l0);
+    printf("Allocated parent pagetable_cap slot");
 
     // Create the L0 VNode in the child's CSpace
     si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
-    si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 table
-    if (err_is_fail(err)) {
-        debug_printf("Failed to create L0 VNode for child: %s\n", err_getstring(err));
-        return err;
-    }
-    printf("before init state root slot: Cnode=%d, Slot=%llu\n", si->childl0_pagetable.cnode, si->childl0_pagetable.slot);
-    cap_copy(si->childl0_pagetable, l0_pagetable_cap);
-    printf("L0 page table created in child's CSpace\n");
-    debug_printf("Root slot child: %s\n", si->childl0_pagetable.slot);
+    si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 tables
+    printf("Allocated child pagetable_cap slot");
 
-    // Step 2: Initialize child paging state
-    struct paging_state child_paging_state;
-    printf("before init state root slot: Cnode=%d, Slot=%llu\n", si->childl0_pagetable.cnode, si->childl0_pagetable.slot);
-    err = paging_init_state_foreign(&child_paging_state, VADDR_OFFSET, si->childl0_pagetable, get_default_slot_allocator());
+
+    err = vnode_create(si->childl0_pagetable, ObjType_VNode_AARCH64_l0);
+    cap_copy(l0_pagetable_cap, si->childl0_pagetable);
+    printf("VNODE CREATE AND COPY");
+
+    si->paging_state = malloc(sizeof(struct paging_state));
+        if (si->paging_state == NULL) {
+            debug_printf("malloc failed\n");
+            return LIB_ERR_MALLOC_FAIL;
+        }
+    printf("MALLOC succeeded\n");
+
+
+    err = paging_init_state_foreign(si->paging_state, VADDR_OFFSET, si->childl0_pagetable, get_default_slot_allocator());
     if (err_is_fail(err)) {
         debug_printf("Failed to initialize child paging state: %s\n", err_getstring(err));
-        free(&child_paging_state);
         return err;
     }
-    si->paging_state = &child_paging_state;  // Save to spawninfo
+
     printf("Child paging state initialized successfully\n");
     return SYS_ERR_OK;
 }
@@ -589,26 +595,50 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
     void *parent_buffer;
     void *child_buffer;
     err = paging_map_frame_attr(get_current_paging_state(), &parent_buffer, DISPATCHER_FRAME_SIZE, parent_disp, VREGION_FLAGS_READ_WRITE);
+        if (err_is_fail(err)) {
+        printf("failed to map dispatcher to parent\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
     err = paging_map_frame_attr(si->paging_state, &child_buffer, DISPATCHER_FRAME_SIZE, parent_disp, VREGION_FLAGS_READ_WRITE);
+        if (err_is_fail(err)) {
+        printf("failed to map dispatcher to child\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
     printf("finished paging map for both parent and child\n");
+
+
     struct dispatcher_shared_generic *disp_share = get_dispatcher_shared_generic((dispatcher_handle_t)parent_buffer);
     struct dispatcher_generic *disp_gen = get_dispatcher_generic((dispatcher_handle_t)parent_buffer);
-    // arch_registers_state_t *enabled_area = dispatcher_get_enabled_save_area((dispatcher_handle_t)parent_buffer);
+    
+    printf("dispatcher generic funcs working\n");
+
+    //arch_registers_state_t *enabled_area = dispatcher_get_enabled_save_area((dispatcher_handle_t)parent_buffer);
     arch_registers_state_t *disabled_area = dispatcher_get_disabled_save_area((dispatcher_handle_t)parent_buffer);
+
+    printf("disabled area\n");
+
     // core id of the process
     disp_gen->core_id = disp_get_core_id();
     disp_gen->domain_id = disp_get_domain_id();
+    printf("core and domain id\n");
+
     // Virtual address of the dispatcher frame in child’s VSpace 
     disp_share->udisp = (lvaddr_t)child_buffer;
     // Start in disabled mode
     disp_share->disabled = 1;
+    printf("set dispatch fields");
+
     // A name (for debugging)
     strncpy(disp_share->name, si->binary_name, DISP_NAME_LEN);
+    printf("Did strncopy");
+
 
     // find .got section
 
-    struct Elf64_Shdr *got_section_header = elf64_find_section_header_name(si->entry_addr, si->child_frame_id.bytes, ".got");
+    struct Elf64_Shdr *got_section_header = elf64_find_section_header_name(si->mapped_elf, si->child_frame_id.bytes, ".got");
     // Set program counter (where it should start to execute)
+    printf("got the got");
+
     disabled_area->named.pc = (lvaddr_t)got_section_header->sh_addr;
     // Initialize offset registers
     // got_addr is the address of the .got in the child’s VSpace
