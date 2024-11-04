@@ -75,7 +75,6 @@ struct spawninfo {
     struct capref child_pagetable;
     struct paging_state *paging_state;
 
-
     /// list of children processes (if this process spawns children)
     struct spawninfo **children;
     size_t num_children;

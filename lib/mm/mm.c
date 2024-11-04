@@ -366,8 +366,8 @@ static errval_t mm_split_end(struct mm *mm, struct mm_node *node, size_t size, b
  * @note The returned ownership of the capability is transferred to the caller.
  */
 errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct capref *retcap) {
-    printf("Calling mm_alloc_aligned\n");   
-    printf("Before allocation - nslots: %u, space: %u\n", mm->ca->nslots, mm->ca->space);
+    // printf("Calling mm_alloc_aligned\n");   
+    // printf("Before allocation - nslots: %u, space: %u\n", mm->ca->nslots, mm->ca->space);
 
     // Alignment Validation 
     if (alignment < BASE_PAGE_SIZE || !is_power_of_two(alignment) || (alignment & (alignment - 1)) != 0) {

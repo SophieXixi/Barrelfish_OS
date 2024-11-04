@@ -131,7 +131,7 @@ void pf_handler(enum exception_type type, int subtype, void *addr, arch_register
     (void)subtype; 
     (void)regs;
     if (type == EXCEPT_PAGEFAULT) {
-        printf("Page fault occurred at address: %p\n", addr);
+        // printf("Page fault occurred at address: %p\n", addr);
         page_fault_handler(addr);  
     } else {
         USER_PANIC(": unhandled exception (type %d) on %p\n", type, addr);
@@ -237,7 +237,7 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
      *     accomodate a buffer of size `bytes`.
      */
     
-    printf("Invoke the paging_alloc function\n");
+    // printf("Invoke the paging_alloc function\n");
     size_t aligned_bytes = ROUND_UP(bytes, alignment);
 
     // Try to find a suitable free region
@@ -290,8 +290,8 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
     // Return the base virtual address of the reserved region
     *buf = (void *)vaddr;
 
-    printf("Reserved virtual address range [%p - %p] as lazily allocated\n",
-           (void *)vaddr, (void *)(vaddr + aligned_bytes));
+    // printf("Reserved virtual address range [%p - %p] as lazily allocated\n",
+    //        (void *)vaddr, (void *)(vaddr + aligned_bytes));
 
     return SYS_ERR_OK;
 }
@@ -352,7 +352,7 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
                   uint64_t offset, uint64_t pte_ct, enum objtype type, struct page_table * parent) {
     errval_t err;
 
-    debug_printf("invoke alloctae_new_pagetable\n");
+    // debug_printf("invoke alloctae_new_pagetable\n");
     slab_refill_check(&(st->slab_allocator));
 
     // Allocate a new page table using the slab allocato
@@ -478,9 +478,9 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
 
         // Update the remaining pages count
         remaining_pages -= pages_mapped;
-        printf("after mapping vaddr: %p\n", vaddr);
+        // printf("after mapping vaddr: %p\n", vaddr);
 
-        printf("Addin the mapped region to the mapped_list\n");
+        // printf("Addin the mapped region to the mapped_list\n");
 
         // Bookkeeping: Add the mapped region to the mapped_list
         struct mapped_region *new_mapped = slab_alloc(&st->slab_allocator);
@@ -498,7 +498,7 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
         new_mapped->mapping_cap = map_slot;
         st->mapped_list = new_mapped;
 
-        printf("Mapped region [%p - %p] added to mapped_list\n", (void *)original_vaddr, (void *)(original_vaddr + bytes));
+        // printf("Mapped region [%p - %p] added to mapped_list\n", (void *)original_vaddr, (void *)(original_vaddr + bytes));
 
         // Check and refill the slab allocator if necessary
         result = slab_refill_check(&(st->slab_allocator));
@@ -517,7 +517,7 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
 void page_fault_handler(void *faulting_address)
 {
     errval_t err;
-    printf("Page fault occurred at address: %p\n", (void*)faulting_address);
+    // printf("Page fault occurred at address: %p\n", (void*)faulting_address);
 
     struct paging_state *st = get_current_paging_state();
 
@@ -548,7 +548,7 @@ void page_fault_handler(void *faulting_address)
     }
 
     // Proceed with lazy allocation and mapping
-    printf("Allocating and mapping frame for lazily allocated region\n");
+    // printf("Allocating and mapping frame for lazily allocated region\n");
 
     struct capref frame;
   ;
@@ -568,7 +568,7 @@ void page_fault_handler(void *faulting_address)
     region->type = PAGING_REGION_MAPPED;
     slab_refill_check(&(st->slab_allocator));
 
-    printf("Successfully handled page fault for lazy allocation at %p\n", faulting_address);
+    // printf("Successfully handled page fault for lazy allocation at %p\n", faulting_address);
 }
 
 
@@ -658,7 +658,7 @@ void merge_adjacent_regions(struct paging_state *st) {
  * The supplied `region` must be the start of a previously mapped frame.
  */
 errval_t paging_unmap(struct paging_state *st, const void *region) {
-    printf("[paging_unmap] Invoked with region starting at: %p\n", region);
+    // printf("[paging_unmap] Invoked with region starting at: %p\n", region);
 
     struct mapped_region *prev = NULL;
     struct mapped_region *curr = st->mapped_list;
@@ -705,7 +705,7 @@ errval_t paging_unmap(struct paging_state *st, const void *region) {
 
     // Free the mapped_region structure
     slab_free(&st->slab_allocator, curr);
-    printf("[paging_unmap] Freed mapped_region structure for address: %p\n", (void *)region);
+    // printf("[paging_unmap] Freed mapped_region structure for address: %p\n", (void *)region);
 
     // Add the unmapped region back to the free list
     add_to_free_list(st, curr->base_addr, curr->region_size);

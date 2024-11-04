@@ -85,10 +85,11 @@ void slab_grow(struct slab_allocator *slabs, void *buf, size_t buflen)
  */
 void *slab_alloc(struct slab_allocator *slabs)
 {
-    debug_printf("invoke slab_alloc\n");
+    // debug_printf("invoke slab_alloc\n");
     size_t free_blocks = slab_freecount(slabs);
-    printf("free slabs: %d\n", free_blocks);
-    printf("slab's address: %p\n", slabs);
+    (void) free_blocks;
+    // printf("free slabs: %d\n", free_blocks);
+    // printf("slab's address: %p\n", slabs);
     errval_t err;
     /* find a slab with free blocks */
     struct slab_head *sh;
@@ -96,13 +97,13 @@ void *slab_alloc(struct slab_allocator *slabs)
 
     if (sh == NULL) {
         /* out of memory. try refill function if we have one */
-        printf("Slab allocator is out of memory, please refill!\n");
+        // printf("Slab allocator is out of memory, please refill!\n");
         if (!slabs->refill_func) {
             return NULL;
         } else {
             err = slabs->refill_func(slabs);
             if (err_is_fail(err)) {
-                DEBUG_ERR(err, "slab refill_func failed");
+                // DEBUG_ERR(err, "slab refill_func failed");
                 return NULL;
             }
             for (sh = slabs->slabs; sh != NULL && sh->free == 0; sh = sh->next);
@@ -184,7 +185,7 @@ size_t slab_freecount(struct slab_allocator *slabs)
  */
 static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 {
-    printf("slab is refilling\n");
+    // printf("slab is refilling\n");
     errval_t err;
     struct capref cap;
 
@@ -280,17 +281,17 @@ return SYS_ERR_OK;
  */
 errval_t slab_default_refill(struct slab_allocator *slabs)
 {
-    printf("Invoke the slab_default_refill function\n");
+    // printf("Invoke the slab_default_refill function\n");
     return slab_refill_pages(slabs, BASE_PAGE_SIZE);
 }
 
 
 // Check the free objects in the slab allocator and refill
 errval_t slab_refill_check(struct slab_allocator *slabs) {
-    printf("Invoke the slab_refill_check function\n");
+    // printf("Invoke the slab_refill_check function\n");
     errval_t err = SYS_ERR_OK;
     if (slab_freecount(slabs) < 64 && !slabs->slab_refilling) { 
-        printf("time to refill the slabs\n");
+        // printf("time to refill the slabs\n");
         slabs->slab_refilling = true;
         err = slab_default_refill(slabs);
         slabs->slab_refilling = false;

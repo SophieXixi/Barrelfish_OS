@@ -156,9 +156,22 @@ static errval_t initialize_child_vspace(struct spawninfo *si);
 
 // static errval_t setup_dispatcher(struct spawninfo *si);
 
-
-
-
+/**
+ * @brief constructs a new process from the provided image pointer
+ *
+ * @param[in] si    spawninfo structure to fill in
+ * @param[in] img   pointer to the elf image in memory
+ * @param[in] argc  number of arguments in argv
+ * @param[in] argv  command line arguments
+ * @param[in] capc  number of capabilities in the caps array
+ * @param[in] caps  array of capabilities to pass to the child
+ * @param[in] pid   the process id (PID) for the new process
+ *
+ * @return SYS_ERR_OK on success, SPAWN_ERR_* on failure
+ *
+ * Note, this function prepares a new process for running, but it does not make it
+ * runnable. See spawn_start().
+ */
 errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc,
                               const char *argv[], int capc, struct capref caps[], domainid_t pid)
 {
@@ -196,6 +209,12 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     elf_load(EM_ARM, allocate_child_frame, (void *) si, si->mapped_elf,
                    si->child_frame_id.bytes, &si->entry_addr);
     printf("LOADED THE ELF");
+
+    // step 5: set up the dispatcher
+    setup_dispatcher(si, pid);
+
+    // step 6: setup the environment
+    setup_args(si, argc, argv);
 
     // Other steps for dispatcher, environment setup, and register setup will follow here
     // e.g., setup_dispatcher(), setup_environment(), configure_registers()
@@ -278,7 +297,6 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     return SYS_ERR_OK;
 }
 
-
 // Step 3: Initialize the child's VSpace
 static errval_t initialize_child_vspace(struct spawninfo *si)
 {
@@ -352,14 +370,131 @@ errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_
 }
 
 // setup dispatcher function
-// static errval_t setup_dispatcher(struct spawninfo *si)
-// {
-//     errval_t err;
-    
-//     return SYS_ERR_OK;
-// }
+static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
+{
+    struct capref disp;
+    errval_t err;
+    err = slot_alloc(&disp);
+    if (err_is_fail(err)) {
+        printf("failed to alloc dispatcher\n");
+        return err;
+    }
+    // create a parent dispatcher frame
+    struct capref parent_disp;
+    err = dispatcher_create(parent_disp);
+    if (err_is_fail(err)) {
+        printf("failed to create dispatcher\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
+    err = frame_alloc(&parent_disp, DISPATCHER_FRAME_SIZE, NULL);
+    if (err_is_fail(err)) {
+        printf("fail to allocate a dispatcher for parent process\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
+    // map the dispatcher frame to both parent and child process
+    void *parent_buffer;
+    void *child_buffer;
+    err = paging_map_frame_attr(get_current_paging_state(), &parent_buffer, DISPATCHER_FRAME_SIZE, parent_disp, VREGION_FLAGS_READ_WRITE);
+    err = paging_map_frame_attr(si->paging_state, child_buffer, DISPATCHER_FRAME_SIZE, parent_disp, VREGION_FLAGS_READ_WRITE);
 
+    struct dispatcher_shared_generic *disp_share = get_dispatcher_shared_generic(parent_buffer);
+    struct dispatcher_generic *disp_gen = get_dispatcher_generic(parent_buffer);
+    arch_registers_state_t *enabled_area = dispatcher_get_enabled_save_area(parent_buffer);
+    arch_registers_state_t *disabled_area = dispatcher_get_disabled_save_area(parent_buffer);
+    // core id of the process
+    disp_gen->core_id = disp_get_core_id();
+    disp_gen->domain_id = disp_get_domain_id();
+    // Virtual address of the dispatcher frame in child’s VSpace 
+    disp_share->udisp = child_buffer;
+    // Start in disabled mode
+    disp_share->disabled = 1;
+    // A name (for debugging)
+    strncpy(disp_share->name, si->binary_name, DISP_NAME_LEN);
 
+    // find .got section
+
+    struct Elf64_Shdr *got_section_header = elf64_find_section_header_name(si->entry_addr, si->child_frame_id.bytes, ".got");
+    // Set program counter (where it should start to execute)
+    disabled_area->named.pc = (lvaddr_t)got_section_header->sh_addr;
+    // Initialize offset registers
+    // got_addr is the address of the .got in the child’s VSpace
+    armv8_set_registers(parent_buffer, si->entry_addr, got_section_header->sh_addr);
+    // we won’t use error handling frames 
+    disp_gen->eh_frame=0;
+    disp_gen->eh_frame_size=0;
+    disp_gen->eh_frame_hdr=0;
+    disp_gen->eh_frame_hdr_size=0;
+    si->disp = child_buffer;
+    printf("finsh set up dispatcher\n");
+
+    // copy the capref to the child
+    struct capref child_dispcap = {
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_DISPATCHER };
+    err = cap_copy(child_dispcap, parent_disp);
+    if (err_is_fail(err)) {
+        printf("failed to copy the cap ref from parent to child\n");
+        return err;
+    }
+    // copy the dispatcher frame to child
+    struct capref child_disp = {
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_DISPFRAME
+    };
+    err = cap_copy(child_disp, disp);
+    if (err_is_fail(err)) {
+        printf("failed to copy the dispatcher frame from parent to child\n");
+        return err;
+    }
+    disp_gen->domain_id = pid;
+    si->dispatcher = child_dispcap;
+    si->dispframe = disp;
+    return SYS_ERR_OK;
+}
+
+// setup the args and the environment
+errval_t setup_args(struct spawninfo *si, int argc, const char **argv[])
+{
+    struct capref args_cap = {
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_ARGSPAGE
+    };
+    void *parent_args;
+    void *child_args;
+    errval_t err;
+    err = frame_alloc(&args_cap, ARGS_SIZE, NULL);
+    if (err_is_fail(err)) {
+        return LIB_ERR_FRAME_ALLOC;
+    }
+    err = paging_map_frame_attr(get_current_paging_state(), &parent_args, ARGS_SIZE, args_cap, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        return SPAWN_ERR_MAP_ARGSPG_TO_SELF;
+    }
+    err = paging_map_frame_attr(si->paging_state, &child_args, ARGS_SIZE, args_cap, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        return SPAWN_ERR_MAP_ARGSPG_TO_NEW;
+    }
+    // fill in args in parent
+    struct spawn_domain_params *sdp = (struct spawn_domain_params *)parent_args;
+    memset(parent_args, 0, ARGS_SIZE);
+    if (argc > MAX_CMDLINE_ARGS) {
+        return ERR_INVALID_ARGS;
+    }
+    size_t offset = 0;
+    for (size_t i = 0; i < argc; i++) {
+        strncpy(parent_args + sizeof(struct spawn_domain_params) + offset, argv[i], strlen(argv[i]) + 1);
+        sdp->argv[i] = child_args + sizeof(struct spawn_domain_params) + offset;
+        offset += strlen(argv[i]) + 1;
+    }
+    sdp->argc = argc;
+    // terminate
+    sdp->argv[argc] = NULL;
+
+    // the first argument in the enabled area in the child process is the spawn domain params pointer.
+    registers_set_param(dispatcher_get_enabled_save_area(si->disp), (lvaddr_t)child_args);
+
+    return SYS_ERR_OK;
+}
 
 /**
  * @brief starts the execution of the new process by making it runnable
@@ -377,8 +512,18 @@ errval_t spawn_start(struct spawninfo *si)
     //  - check whether the process is in the right state (ready to be started)
     //  - invoke the dispatcher to make the process runnable
     //  - set the state to running
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    if (si->state != SPAWN_STATE_READY) {
+        return SPAWN_ERR_RUN;
+    }
+    // !!!
+    errval_t err = invoke_dispatcher(si->dispatcher, cap_dispatcher, si->, si->l1pagetable, si->dispframe, true);
+    if (err_is_fail(err)) {
+        printf("fail to invoke the dispatcher\n");
+        return err;
+    }
+    si->state = SPAWN_STATE_RUNNING;
+    // USER_PANIC("Not implemented");
+    return SYS_ERR_OK;
 }
 
 /**

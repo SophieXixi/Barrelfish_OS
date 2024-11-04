@@ -48,26 +48,26 @@ errval_t slot_prealloc_refill(struct slot_prealloc *this)
 {
     errval_t err;
 
-    printf("Calling the slot_prealloc_refill\n");
+    // printf("Calling the slot_prealloc_refill\n");
     /* If we are already refilling, just return */
     if (this->is_refilling) {
-         printf("Refill already in progress\n");
+        //  printf("Refill already in progress\n");
         return SYS_ERR_OK;
     }
 
     /* refill the next CNode if we've used one up */
     uint8_t refill = !this->current;
-     printf("Current index: %u, Refill index: %u\n", this->current, refill);
+    //  printf("Current index: %u, Refill index: %u\n", this->current, refill);
     assert(refill == 0 || refill == 1);
 
 
     /* if the next CNode is still full, we do not have to do anything */
     if (this->meta[refill].free == L2_CNODE_SLOTS) {
-        printf("No need to refill, CNode still full\n");
+        // printf("No need to refill, CNode still full\n");
         return SYS_ERR_OK;
     }
 
-    printf("Refilling required, proceeding\n");
+    // printf("Refilling required, proceeding\n");
     this->is_refilling = true;
 
     /*
@@ -77,7 +77,7 @@ errval_t slot_prealloc_refill(struct slot_prealloc *this)
     struct capref ram_cap = NULL_CAP;
     err = mm_alloc(this->mm, OBJSIZE_L2CNODE, &ram_cap);
     if (err_is_fail(err)) {
-        printf("Failed to allocate RAM for L2 CNode: %s\n", err_getstring(err));
+        // printf("Failed to allocate RAM for L2 CNode: %s\n", err_getstring(err));
         err = err_push(err, MM_ERR_SLOT_MM_ALLOC);
         goto out;
     }
@@ -91,10 +91,10 @@ errval_t slot_prealloc_refill(struct slot_prealloc *this)
     err = slot_alloc_root(&cnode_cap);
     if (err_no(err) == LIB_ERR_SLOT_ALLOC_NO_SPACE) {
         /* we got an out of memory error, try refilling the root slot allocator */
-        printf("No space in root CNode, attempting to refill root slot allocator\n");
+        // printf("No space in root CNode, attempting to refill root slot allocator\n");
         err = root_slot_allocator_refill(rootcn_alloc, this->mm);
         if (err_is_fail(err)) {
-            printf("Failed to refill root slot allocator: %s\n", err_getstring(err));
+            // printf("Failed to refill root slot allocator: %s\n", err_getstring(err));
             err = err_push(err, LIB_ERR_ROOTSA_RESIZE);
             goto out;
         }
@@ -124,13 +124,13 @@ errval_t slot_prealloc_refill(struct slot_prealloc *this)
     this->meta[refill].cap.slot = 0;
     this->meta[refill].free = L2_CNODE_SLOTS;
     this->a.space += L2_CNODE_SLOTS;
-    printf("Finshing call the slot_prealloc_refill\n");
+    // printf("Finshing call the slot_prealloc_refill\n");
 out:
     /* free the allocated RAM cap if there was an error and we have allocated a ramcap */
     if (err_is_fail(err) && !capref_is_null(ram_cap)) {
         err = mm_free(this->mm, ram_cap);   
         if (err_is_fail(err)) {
-            DEBUG_ERR(err, "mm_free failed");
+            // DEBUG_ERR(err, "mm_free failed");
         }
     }
     this->is_refilling = false;
@@ -202,8 +202,8 @@ errval_t slot_prealloc_free(struct slot_prealloc *this, struct capref cap)
         this->meta[this->current].cap.slot--;
         this->a.space++;
     } else {
-        debug_printf("WARNING: leaking capablity slot (caller: %p)",
-                     __builtin_return_address(0));
+        // debug_printf("WARNING: leaking capablity slot (caller: %p)",
+                    //  __builtin_return_address(0));
     }
     return SYS_ERR_OK;
 }
