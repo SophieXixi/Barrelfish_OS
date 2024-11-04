@@ -329,6 +329,7 @@ caps_map_l0(struct capability* dest,
             uintptr_t          pte_count,
             struct cte*        mapping_cte)
 {
+    printf("CHOSE L0");
     (void)kpi_paging_flags;
 
     if (slot >= VMSAv8_64_PTABLE_NUM_ENTRIES) {
@@ -341,10 +342,12 @@ caps_map_l0(struct capability* dest,
         return SYS_ERR_VM_MAP_SIZE;
     }
 
+
     if (src->type != ObjType_VNode_AARCH64_l1) {
         char buf[128];
         sprint_cap(buf, 128, src);
         debug(SUBSYS_PAGING, "src: %s\n", buf);
+        printf("Unexpected src type: %d (Expected: %d)\n", src->type, ObjType_VNode_AARCH64_l1);
         return SYS_ERR_WRONG_MAPPING;
     }
 
@@ -393,6 +396,7 @@ caps_map_l1(struct capability* dest,
             uintptr_t          pte_count,
             struct cte*        mapping_cte)
 {
+    printf("CHOSE L1");
     (void)kpi_paging_flags;
 
     if (slot >= VMSAv8_64_PTABLE_NUM_ENTRIES) {
@@ -405,7 +409,9 @@ caps_map_l1(struct capability* dest,
         return SYS_ERR_VM_MAP_SIZE;
     }
 
+    printf("Source type: %d, Destination type: %d\n", src->type, dest->type);
     if (src->type != ObjType_VNode_AARCH64_l2) {
+        printf("Unexpected src type: %d (Expected: %d)\n", src->type, ObjType_VNode_AARCH64_l2);
         return SYS_ERR_WRONG_MAPPING;
     }
 
@@ -456,6 +462,9 @@ static errval_t caps_map_l2(struct capability *dest, cslot_t slot, struct capabi
                             uintptr_t kpi_paging_flags, uintptr_t offset,
                             uintptr_t pte_count, struct cte *mapping_cte)
 {
+    printf("CHOSE L2");
+    printf("Source type: %d, Destination type: %d\n", src->type, dest->type);
+
     // make compiler happy about unused parameters
     (void)kpi_paging_flags;
 
@@ -502,6 +511,7 @@ static errval_t caps_map_l2(struct capability *dest, cslot_t slot, struct capabi
 
         break;
     default:
+        printf("ERROR IN THIRD");
         return SYS_ERR_WRONG_MAPPING;
     }
 
@@ -523,6 +533,9 @@ caps_map_l3(struct capability* dest,
             struct cte*        mapping_cte)
 {
     assert(0 == (kpi_paging_flags & ~KPI_PAGING_FLAGS_MASK));
+    printf("CHOSE L3");
+    printf("Source type: %d, Destination type: %d\n", src->type, dest->type);
+
 
     // Check slot is valid and mapping does not overlap leaf page table
     if (slot + pte_count > VMSAv8_64_PTABLE_NUM_ENTRIES) {
@@ -535,6 +548,7 @@ caps_map_l3(struct capability* dest,
     }
 
     if (src->type != ObjType_Frame && src->type != ObjType_DevFrame) {
+        printf("ERROR IN LAST");
         return SYS_ERR_WRONG_MAPPING;
     }
 
@@ -549,13 +563,22 @@ caps_map_l3(struct capability* dest,
     lvaddr_t dest_lvaddr = local_phys_to_mem(dest_lpaddr);
 
     union armv8_ttable_entry *entry = (union armv8_ttable_entry *)dest_lvaddr + slot;
+    printf("Starting to map %zu page table entries at virtual address: 0x%lx\n", pte_count, (uintptr_t)dest_lvaddr);
     for (size_t i = 0; i < pte_count; i++) {
         if (entry[i].d.valid) {
-            // cleanup mapping info
-            debug(SUBSYS_PAGING, "ARMv8 L3 @ 0x%lx: slot %d in use\n", dest_lpaddr, slot + i);
+            printf("ARMv8 L3 @ 0x%lx: slot %zu already in use\n",
+                        (uintptr_t)dest_lvaddr, slot + i);
             return SYS_ERR_VNODE_SLOT_INUSE;
+        } else {
+            printf("ARMv8 L3 @ 0x%lx: slot %zu available\n",
+                        (uintptr_t)dest_lvaddr, slot + i);
         }
     }
+    uint64_t start_vaddr = dest_lvaddr + (slot * BASE_PAGE_SIZE);
+    uint64_t end_vaddr = start_vaddr + (pte_count * BASE_PAGE_SIZE) - 1;
+
+    printf("Mapping %zu pages from virtual address 0x%lx to 0x%lx\n", pte_count, start_vaddr, end_vaddr);
+
 
     lpaddr_t src_lpaddr = gen_phys_to_local_phys(get_address(src) + offset);
     if ((src_lpaddr & (BASE_PAGE_SIZE - 1))) {

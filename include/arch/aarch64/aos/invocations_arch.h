@@ -169,6 +169,16 @@ static inline errval_t invoke_vnode_map(struct capref ptable, capaddr_t slot, ca
 
     uintptr_t small_values = srclevel | (mcnlevel << 4) | (mapping_slot << 8) | (slot << 16);
 
+    printf("Invoking vnode_map with the following parameters:\n");
+    printf("  ptable Root: %d\n", get_croot_addr(ptable));
+    printf("  Slot: %d\n", slot);
+    printf("  Source Root: %d, Source Addr: %d, Source Level: %d\n", src_root, src, srclevel);
+    printf("  Mapping Cap Root: %d, Mapping Cap Addr: %d, Mapping Cap Level: %d\n", mcnroot, mcnaddr, mcnlevel);
+    printf("  Flags: %zu, Offset: %zu, PTE Count: %zu\n", flags, offset, pte_count);
+    printf("  Mapping Slot: %d\n", mapping_slot);
+    printf("  Small values: 0x%x\n", small_values);
+
+
     return cap_invoke9(ptable, VNodeCmd_Map, src_root, src, flags, offset, pte_count, mcnroot,
                        mcnaddr, small_values)
         .error;

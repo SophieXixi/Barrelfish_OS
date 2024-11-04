@@ -132,7 +132,7 @@ errval_t morecore_init(size_t alignment)
  * Hint: it may make sense to implement eager mapping first, then switch to lazy mapping and
  *       handling of the page faults on demand.
  */
-static void *morecore_alloc(size_t bytes, size_t *retbytes)
+void *morecore_alloc(size_t bytes, size_t *retbytes)
 {
     void *buf;
     struct morecore_state *state = get_morecore_state();

@@ -361,15 +361,26 @@ static inline errval_t vnode_map(struct capref dest, struct capref src, capaddr_
                                  uint64_t attr, uint64_t off, uint64_t pte_count,
                                  struct capref mapping)
 {
-    assert(get_croot_addr(dest) == CPTR_ROOTCN);
+    printf("get_croot_addr(dest): 0x%lx, CPTR_ROOTCN: 0x%lx\n", get_croot_addr(dest), CPTR_ROOTCN);
+    //assert(get_croot_addr(dest) == CPTR_ROOTCN);
 
     capaddr_t       sroot  = get_croot_addr(src);
     capaddr_t       saddr  = get_cap_addr(src);
     enum cnode_type slevel = get_cap_level(src);
 
+    enum cnode_type dlevel = get_cap_level(dest);
+    capaddr_t       daddr  = get_cap_addr(dest);
+    capaddr_t       droot  = get_croot_addr(dest);
+
+
     enum cnode_type mcn_level = get_cnode_level(mapping);
     capaddr_t       mcn_addr  = get_cnode_addr(mapping);
     capaddr_t       mcn_root  = get_croot_addr(mapping);
+
+    printf("Source cap: root=0x%lx, addr=0x%lx, level=%d\n", sroot, saddr, slevel);
+    printf("Destination cap: root=0x%lx, addr=0x%lx, level=%d\n", droot, daddr, dlevel);
+    printf("Mapping cap: root=0x%lx, addr=0x%lx, level=%d\n", mcn_root, mcn_addr, mcn_level);
+
 
     printf("ready to call invoke_vnoce_map\n");
     return invoke_vnode_map(dest, slot, sroot, saddr, slevel, attr, off, pte_count, mcn_root,

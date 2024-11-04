@@ -24,8 +24,11 @@
 #include <aos/cspace.h>
 #include <aos/paging.h>
 #include <aos/morecore.h>
+#include <aos/morecore.h>
 
 
+
+#define HEAP_ALLOC_SIZE (256 << 10)
 
 #define HEAP_ALLOC_SIZE (256 << 10)
 
@@ -108,10 +111,12 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
 
     si->child_frame_id = child_frame_id;
     si->mapped_elf = mapped_elf;
+    si->module = module;
     // - create the elfimg struct from the module
     struct elfimg img;
     elfimg_init_from_module(&img, module);
     printf("Created elf image\n");
+
 
 
     // - Fill in argc/argv from the multiboot command line
@@ -124,7 +129,6 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
         return SPAWN_ERR_CREATE_ARGSPG;
     }
     printf("Created arguments argc and argv\n");
-
 
     // - Call spawn_load_with_args
     err = spawn_load_with_args(si, &img, argc, (const char **)argv, pid);
@@ -208,9 +212,14 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     (void)img;
 
     // Step 4: Load the ELF image into the child's VSpace
-    elf_load(EM_ARM, allocate_child_frame, (void *) si, si->mapped_elf,
-                   si->child_frame_id.bytes, &si->entry_addr);
-    printf("LOADED THE ELF\n");
+    err = elf_load(EM_AARCH64, allocate_child_frame, si->paging_state, si->mapped_elf,
+                   si->module->mrmod_size, &si->entry_addr);
+    printf("LOADED THE ELF 1");
+    if (err_is_fail(err)) {
+        debug_printf("Failed to load ELF: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("LOADED THE ELF");
 
     // step 5: set up the dispatcher
     setup_dispatcher(si, pid);
@@ -246,7 +255,11 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     struct capref l1_cap;
     // Step 1: Create the L1 CNode for the child’s CSpace
     errval_t err = cnode_create_l1(&l1_cap, &si->l1_cnode);
+    struct capref l1_cap;
+    // Step 1: Create the L1 CNode for the child’s CSpace
+    errval_t err = cnode_create_l1(&l1_cap, &si->l1_cnode);
     if (err_is_fail(err)) {
+        debug_printf("Error creating L1 CNode %s\n", err_getstring(err));
         debug_printf("Error creating L1 CNode %s\n", err_getstring(err));
         return err;
     }
@@ -255,10 +268,18 @@ static errval_t setup_child_cspace(struct spawninfo *si)
 
     
     // Step 3: Create and link L2 CNodes in the child’s CSpace
+    printf("Created L1 CNode\n");
+
+
+    
+    // Step 3: Create and link L2 CNodes in the child’s CSpace
     for (size_t i = 0; i < ROOTCN_SLOTS_USER; ++i) {
         // Create an L2 CNode in the parent CSpace but to be used by the child
         err = cnode_create_foreign_l2(l1_cap, i, &si->l2_cnodes[i]);
+        // Create an L2 CNode in the parent CSpace but to be used by the child
+        err = cnode_create_foreign_l2(l1_cap, i, &si->l2_cnodes[i]);
         if (err_is_fail(err)) {
+            debug_printf("Error creating foreign L2 CNode: %s\n", err_getstring(err));
             debug_printf("Error creating foreign L2 CNode: %s\n", err_getstring(err));
             return err;
         }
@@ -365,6 +386,7 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     }
 
     printf("CSPACE setup for child completed.\n");
+    printf("CSPACE setup for child completed.\n");
     return SYS_ERR_OK;
 }
 
@@ -372,23 +394,39 @@ static errval_t setup_child_cspace(struct spawninfo *si)
 static errval_t initialize_child_vspace(struct spawninfo *si)
 {   
     (void)si;
+{   
+    (void)si;
     errval_t err;
+    //     // Step 1: Create the child’s L0 page table in its VSpace
+    struct capref l0_pagetable_cap;
+    err = slot_alloc(&l0_pagetable_cap);  // Allocate a slot in the parent CSpace
     //     // Step 1: Create the child’s L0 page table in its VSpace
     struct capref l0_pagetable_cap;
     err = slot_alloc(&l0_pagetable_cap);  // Allocate a slot in the parent CSpace
     if (err_is_fail(err)) {
         debug_printf("Failed to allocate slot for L0 page table: %s\n", err_getstring(err));
+        debug_printf("Failed to allocate slot for L0 page table: %s\n", err_getstring(err));
         return err;
     }
+    err = vnode_create(l0_pagetable_cap, ObjType_VNode_AARCH64_l0);
     err = vnode_create(l0_pagetable_cap, ObjType_VNode_AARCH64_l0);
 
     // // Create the L0 VNode in the child's CSpace
     si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
     si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 table
+    // // Create the L0 VNode in the child's CSpace
+    si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
+    si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 table
     if (err_is_fail(err)) {
+        debug_printf("Failed to create L0 VNode for child: %s\n", err_getstring(err));
         debug_printf("Failed to create L0 VNode for child: %s\n", err_getstring(err));
         return err;
     }
+    printf("before init state root slot: Cnode=%d, Slot=%llu\n", si->childl0_pagetable.cnode, si->childl0_pagetable.slot);
+    cap_copy(si->childl0_pagetable, l0_pagetable_cap);
+    printf("L0 page table created in child's CSpace\n");
+    debug_printf("Root slot child: %s\n", si->childl0_pagetable.slot);
+
     printf("before init state root slot: Cnode=%d, Slot=%llu\n", si->childl0_pagetable.cnode, si->childl0_pagetable.slot);
     cap_copy(si->childl0_pagetable, l0_pagetable_cap);
     printf("L0 page table created in child's CSpace\n");
@@ -399,11 +437,20 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
     struct paging_state child_paging_state;
     printf("before init state root slot: Cnode=%d, Slot=%llu\n", si->childl0_pagetable.cnode, si->childl0_pagetable.slot);
     err = paging_init_state_foreign(&child_paging_state, VADDR_OFFSET, si->childl0_pagetable, get_default_slot_allocator());
+    // // Step 2: Initialize child paging state
+    struct paging_state child_paging_state;
+    printf("before init state root slot: Cnode=%d, Slot=%llu\n", si->childl0_pagetable.cnode, si->childl0_pagetable.slot);
+    err = paging_init_state_foreign(&child_paging_state, VADDR_OFFSET, si->childl0_pagetable, get_default_slot_allocator());
     if (err_is_fail(err)) {
+        debug_printf("Failed to initialize child paging state: %s\n", err_getstring(err));
+        free(&child_paging_state);
         debug_printf("Failed to initialize child paging state: %s\n", err_getstring(err));
         free(&child_paging_state);
         return err;
     }
+    si->paging_state = &child_paging_state;  // Save to spawninfo
+    printf("Child paging state initialized successfully\n");
+
     si->paging_state = &child_paging_state;  // Save to spawninfo
     printf("Child paging state initialized successfully\n");
 
@@ -417,14 +464,47 @@ errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_
     (void)state;
     (void)base;
     (void)flags;
+// allocate function for elf
+errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_t flags, void **ret) {
+    errval_t err;
+    (void)state;
+    (void)base;
+    (void)flags;
 
+    // Step 1: Calculate offset and adjust base and size for page alignment
     // Step 1: Calculate offset and adjust base and size for page alignment
     size_t offset = BASE_PAGE_OFFSET(base);
     base -= offset;
     size = ROUND_UP(size + offset, BASE_PAGE_SIZE);
 
     // Step 2: Allocate a frame for the required size
+    // Step 2: Allocate a frame for the required size
     struct capref frame;
+    size_t allocated_size;
+    err = frame_alloc(&frame, size, &allocated_size);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to allocate frame: %s\n", err_getstring(err));
+        return err;
+    }
+
+    // // Step 3: Map the frame at the specified fixed address in the child’s address space
+    err = paging_map_fixed_attr(state, base, frame, size, flags);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to map frame at fixed address in child's address space: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("Mapped frame in child's virtual address space at fixed address: 0x%lx\n", base);
+
+    // Step 4: Use morecore_alloc to allocate memory in the parent’s address space for ELF loading
+    err = paging_map_frame(get_current_paging_state(), ret, size, frame);
+    printf("Mapped frame in parent's address space at address: %p\n", *ret);
+
+    // Step 5: Adjust `ret` by `offset` so that it points to the correct location
+    // Debug information
+    printf("Mapped address in parent (ret): %p\n", *ret);
+    printf("Offset (alignment difference): %lu\n", offset);
+    printf("size of what we just mapped: %p\n", size);
+
     size_t allocated_size;
     err = frame_alloc(&frame, size, &allocated_size);
     if (err_is_fail(err)) {
@@ -453,6 +533,7 @@ errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_
 
     return SYS_ERR_OK;
 }
+
 
 
 // // setup dispatcher function
