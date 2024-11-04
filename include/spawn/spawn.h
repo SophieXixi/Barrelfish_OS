@@ -64,6 +64,7 @@ struct spawninfo {
     genvaddr_t entry_addr;
     struct mem_region *module;              ///< Program entry point
 
+
     // L1 CNODE REPRESENTING CSPACE
     struct capref l1_cap;
     struct cnoderef l1_cnode;
