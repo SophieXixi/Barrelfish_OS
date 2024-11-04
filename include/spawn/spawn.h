@@ -61,21 +61,29 @@ struct spawninfo {
     // MAPPING ELF TOOLS
     struct frame_identity child_frame_id;
     lvaddr_t mapped_elf;
-    genvaddr_t entry_addr;              ///< Program entry point
+    genvaddr_t entry_addr;
+    struct mem_region *module;              ///< Program entry point
 
 
     // L1 CNODE REPRESENTING CSPACE
-    struct cnoderef l1_cnode;
     struct capref l1_cap;
+    struct cnoderef l1_cnode;
     struct cnoderef l2_cnodes[ROOTCN_SLOTS_USER];
-
+    struct capref selfep_cap;
+    struct capref argspage_cap;
+    struct capref earlymem_cap;
 
     // VSPACE STUFF
-    struct capref l1pagetable;
-    struct capref child_pagetable;
+    struct capref l0pagetable;
+    struct capref childl0_pagetable;
     struct paging_state *paging_state;
 
-    /// list of children processes (if this process spawns children)
+    // DISPATCHER STUFF:
+    dispatcher_handle_t disp;
+    struct capref dispframe;
+    struct capref dispatcher;
+
+    // list of children processes (if this process spawns children)
     struct spawninfo **children;
     size_t num_children;
 
