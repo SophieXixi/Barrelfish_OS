@@ -149,29 +149,11 @@ domainid_t allocate_pid(struct process_manager *manager) {
  */
 errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domainid_t *pid) {
     (void)core;
-    // Find the image in multiboot
-    struct mem_region *module = multiboot_find_module(bi, cmdline);
-    if (module == NULL) {
-        debug_printf("Error: Module not found for %s\n", cmdline);
-        return SPAWN_ERR_FIND_MODULE;
-    }
-    printf("Module found for %s at base address: 0x%lx\n", cmdline, module->mr_base);
-
-        // Allocate a PID
-    // domainid_t new_pid = allocate_pid(proc_manager);
-    // if (new_pid == 0) {
-    //     debug_printf("Error: PID allocation failed, out of PIDs\n");
-    //     return SPAWN_ERR_OUT_OF_PIDS;
-    // }
-    // *pid = new_pid;
-    // printf("Allocated PID: %u\n", new_pid);
-
 
     // Initialize `spawninfo` structure
     struct spawninfo si;
     printf("si initialized");
    
-
     // Call spawn_load_with_bootinfo to load the process
     printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
     si.core_id = my_core_id;

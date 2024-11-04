@@ -90,10 +90,56 @@ __attribute__((unused)) static errval_t pt_alloc_l3(struct paging_state *st, str
  *
  * @return SYS_ERR_OK on success, or LIB_ERR_* on failure
  */
-// errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr,
-//                                    struct capref pdir, struct slot_allocator *ca) 
-//     {
-//     }
+/**
+ * @brief Initializes the paging state struct for a foreign (child) process.
+ *
+ * @param[in] st           The paging state to be initialized.
+ * @param[in] start_vaddr  Starting virtual address to be managed.
+ * @param[in] root         Capability for the root-level page table in the child’s CSpace.
+ * @param[in] ca           Slot allocator instance to be used.
+ *
+ * @return SYS_ERR_OK on success, or LIB_ERR_* on failure.
+ */
+errval_t paging_init_state_foreign(struct paging_state *st, lvaddr_t start_vaddr,
+                                   struct capref root, struct slot_allocator *ca)
+{
+    // Initialize basic fields for the paging state struct
+    st->current_vaddr = start_vaddr;
+    st->start_vaddr = start_vaddr;
+    st->slot_alloc = ca;
+
+    // Initialize the slab allocator for paging regions
+    static char slab_buffer[100 * 20480];  // Adjust size as necessary
+    slab_init(&st->slab_allocator, sizeof(struct page_table), NULL);
+    slab_grow(&st->slab_allocator, slab_buffer, sizeof(slab_buffer));
+
+    // Allocate memory for the root page table using the slab allocator
+    st->root = slab_alloc(&st->slab_allocator);
+    if (st->root == NULL) {
+        return LIB_ERR_SLAB_ALLOC_FAIL;
+    }
+
+    // Set up the root page table properties
+    st->root->parent = NULL;          // The root has no parent
+    st->root->cap = root;             // Root capability (from child’s CSpace)
+    st->root->self = root;            // Self reference to root cap in foreign space
+    st->root->mapping = root;         // Mapping cap reference
+    st->root->offset = 0;             // Offset is zero for root
+    st->root->numBytes = 0;           // Initialize size tracking to zero
+    printf("Root slot %s\n", st->root->cap.slot);
+
+    // Initialize all child page table entries to NULL initially
+    for (int i = 0; i < NUM_PT_SLOTS; i++) {
+        st->root->children[i] = NULL;
+    }
+
+    // Set the region and free lists to NULL initially
+    st->mapped_list = NULL;
+    st->region_list = NULL;
+    st->free_list = NULL;
+
+    return SYS_ERR_OK;
+}
 
 
 /**
@@ -147,6 +193,7 @@ void pf_handler(enum exception_type type, int subtype, void *addr, arch_register
     (void)regs;
     if (type == EXCEPT_PAGEFAULT) {
         printf("Page fault occurred at address: %p\n", addr);
+        printf("subtype: %p\n", subtype);
         page_fault_handler(addr);  
     } else {
         USER_PANIC(": unhandled exception (type %d) on %p\n", type, addr);
@@ -368,6 +415,7 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
                   uint64_t offset, uint64_t pte_ct, enum objtype type, struct page_table * parent) {
     errval_t err;
     struct capref mapping;
+    //bool is_child = (st != get_current_paging_state())
 
     debug_printf("Allocating new page table: Type=%d, Slot=%llu\n", type, slot);
 
@@ -401,7 +449,6 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
     debug_printf("Page table setup completed successfully.\n");
     return SYS_ERR_OK;
 }
-
 /**
  * @brief maps a frame at a user-provided virtual address region
  *
@@ -421,6 +468,9 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
                                       size_t bytes, size_t offset, int flags)
 {    
     printf("vaddr at start of function: 0x%lx\n", vaddr);
+    printf("[paging_state] Current Paging State:\n");
+    printf("  start_vaddr: %p\n", (void *)st->start_vaddr);
+    printf("  current_vaddr: %p\n", (void *)st->current_vaddr);
 
     errval_t result;
     int pages_mapped;
@@ -429,107 +479,138 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
     int total_pages = ROUND_UP(bytes, BASE_PAGE_SIZE) / BASE_PAGE_SIZE;
     int remaining_pages = total_pages;
     lvaddr_t original_vaddr = vaddr;
+    
+    bool is_child = !(st == get_current_paging_state());
+    printf("is child: %p\n", is_child);
 
-    // Perform the mapping in chunks that fit within an L3 page table
+
     while (remaining_pages > 0) {
         printf("ITERATION FIXED");
+
         // Calculate page table indices for the current virtual address
         int l0_idx = VMSAv8_64_L0_INDEX(vaddr);
         int l1_idx = VMSAv8_64_L1_INDEX(vaddr);
         int l2_idx = VMSAv8_64_L2_INDEX(vaddr);
         int l3_idx = VMSAv8_64_L3_INDEX(vaddr);
 
-        // Allocate and initialize a new L1 page table if necessary
+        // Helper function to allocate and map page tables with temporary VNode copies for the child
+        struct capref vnode_cap;
+        if (is_child) {
+            // Temporarily copy VNode capability into the parent’s CSpace
+            errval_t temp_err = slot_alloc(&vnode_cap);
+            if (err_is_fail(temp_err)) {
+                return temp_err;
+            }
+            temp_err = cap_copy(vnode_cap, st->root->self);
+            if (err_is_fail(temp_err)) {
+                cap_destroy(vnode_cap);
+                return temp_err;
+            }
+            printf("Temporary VNode copy created in parent CSpace for child mapping.\n");
+        } else {
+            vnode_cap = st->root->self;
+        }
+
+        if(is_child) {
+            if(l0_idx == 511) {
+                l0_idx = 0;
+            } else {
+                l0_idx++;
+            }
+        }
+
+        // Allocate and initialize page tables (L1, L2, L3) if necessary
         if (st->root->children[l0_idx] == NULL) {
-            printf("L1 pagetable allocated, checking state of st->root->children[%d]: %p\n", l0_idx, st->root->children[l0_idx]);
+            printf("before allocate root slot: Cnode=%d, Slot=%llu\n", st->root->cap.cnode, st->root->cap.slot);
+
             result = allocate_new_pagetable(st, l0_idx, 0, 1, ObjType_VNode_AARCH64_l1, st->root);
-            // result = pt_alloc_l1();
             printf("L1 pagetable allocated, checking state of st->root->children[%d]: %p\n", l0_idx, st->root->children[l0_idx]);
             if (err_is_fail(result)) {
+                if (is_child) cap_destroy(vnode_cap);
                 printf("Error allocating L1 pagetable: %s\n", err_getstring(result));
                 return result;
             }
-
         }
 
-        // Allocate and initialize a new L2 page table if necessary
         if (st->root->children[l0_idx]->children[l1_idx] == NULL) {
             result = allocate_new_pagetable(st, l1_idx, 0, 1, ObjType_VNode_AARCH64_l2, 
                                             st->root->children[l0_idx]);
             if (err_is_fail(result)) {
+                if (is_child) cap_destroy(vnode_cap);
                 printf("Error allocating L2 pagetable: %s\n", err_getstring(result));
                 return result;
             }
         }
 
-        // Allocate and initialize a new L3 page table if necessary
         if (st->root->children[l0_idx]->children[l1_idx]->children[l2_idx] == NULL) {
             result = allocate_new_pagetable(st, l2_idx, 0, 1, ObjType_VNode_AARCH64_l3, 
                                             st->root->children[l0_idx]->children[l1_idx]);
             if (err_is_fail(result)) {
+                if (is_child) cap_destroy(vnode_cap);
                 printf("Error allocating L3 pagetable: %s\n", err_getstring(result));
                 return result;
             }
         }
 
         struct capref map_slot;
-
-        //Allocates a slot in which the mapping will be stored.
         result = st->slot_alloc->alloc(st->slot_alloc, &map_slot);
         if (err_is_fail(result)) {
+            if (is_child) cap_destroy(vnode_cap);
             return err_push(result, LIB_ERR_SLOT_ALLOC);
         }
 
         // Map the maximum number of pages that can fit into the L3 page table
         pages_mapped = MIN((int)(NUM_PT_SLOTS - l3_idx), remaining_pages);
-        debug_printf("Number of pages mapped: %d", pages_mapped);
+        debug_printf("Number of pages mapped: %d\n", pages_mapped);
         result = vnode_map(st->root->children[l0_idx]->children[l1_idx]->children[l2_idx]->self, 
                            frame, VMSAv8_64_L3_INDEX(vaddr), flags, offset + (BASE_PAGE_SIZE * (total_pages - remaining_pages)), 
                            pages_mapped, map_slot);
         if (err_is_fail(result)) {
+            if (is_child) cap_destroy(vnode_cap);
             printf("vnode_map failed during leaf node mapping: %s\n", err_getstring(result));
             return result;
         }
 
-        // Mark remaining slots in this L3 page table as unused
+        // Cleanup: Destroy the temporary VNode cap if created
+        if (is_child) {
+            cap_destroy(vnode_cap);
+            printf("Temporary VNode cap destroyed after child mapping.\n");
+        }
+
         vaddr += BASE_PAGE_SIZE;
         for (int j = VMSAv8_64_L3_INDEX(vaddr); j < NUM_PT_SLOTS; j++) {
             st->root->children[l0_idx]->children[l1_idx]->children[l2_idx]->children[l3_idx] = (void*)1;
             vaddr += BASE_PAGE_SIZE;
         }
 
-        // Update the remaining pages count
         remaining_pages -= pages_mapped;
         printf("after mapping vaddr: %p\n", vaddr);
 
         printf("Addin the mapped region to the mapped_list\n");
 
-        // Bookkeeping: Add the mapped region to the mapped_list
         struct mapped_region *new_mapped = slab_alloc(&st->slab_allocator);
         if (new_mapped == NULL) {
             return LIB_ERR_SLAB_ALLOC_FAIL;
         }
 
-        // Initialize the mapped_region fields
         new_mapped->base_addr = original_vaddr;
-        new_mapped->region_size = bytes;
+        new_mapped->region_size = ROUND_UP(bytes, BASE_PAGE_SIZE);
         new_mapped->flags = flags;
         new_mapped->frame_cap = frame;
         new_mapped->offset = offset;
-        new_mapped->next = st->mapped_list; // Insert at the head of the list
+        new_mapped->next = st->mapped_list;
         new_mapped->mapping_cap = map_slot;
         st->mapped_list = new_mapped;
 
-        printf("Mapped region [%p - %p] added to mapped_list\n", (void *)original_vaddr, (void *)(original_vaddr + bytes));
+        printf("Mapped region [%p - %p] added to mapped_list\n", (void *)original_vaddr, (void *)(original_vaddr + new_mapped->region_size));
 
-        // Check and refill the slab allocator if necessary
         result = slab_refill_check(&(st->slab_allocator));
         if (err_is_fail(result)) {
             printf("Slab allocation error: %s\n", err_getstring(result));
             return LIB_ERR_SLAB_REFILL;
         }
     }
-    printf("FINISHED FIXED FUNXTION");
+    printf("FINISHED FIXED FUNCTION\n");
     return SYS_ERR_OK;
 }
 
@@ -542,13 +623,17 @@ void page_fault_handler(void *faulting_address)
     printf("Page fault occurred at address: %p\n", (void*)faulting_address);
 
     struct paging_state *st = get_current_paging_state();
-    printf("[paging_state] Current Paging State:\n");
-    printf("  start_vaddr: %p\n", (void *)st->start_vaddr);
-    printf("  current_vaddr: %p\n", (void *)st->current_vaddr);
-
 
     // Convert the faulting address to `lvaddr_t`
     lvaddr_t aligned_faulting_address = (lvaddr_t)faulting_address & ~(BASE_PAGE_SIZE - 1); // Align address
+    lvaddr_t page_faulting_addr = (lvaddr_t)faulting_address;
+
+    printf("Page fault occurred at aligned address: %p\n", aligned_faulting_address);
+
+    printf("SLOT for faulting address: %p\n", VMSAv8_64_L3_INDEX(page_faulting_addr));
+    printf("SLOT for aligned address: %p\n", VMSAv8_64_L3_INDEX(aligned_faulting_address));
+
+
 
     // Find the region where the page fault occurred
     struct paging_region *region = st->region_list;
@@ -561,26 +646,33 @@ void page_fault_handler(void *faulting_address)
         region = region->next;
     }
 
+
     // No region found, handle the error
-    if (region == NULL || region->type != PAGING_REGION_LAZY) { 
+    if (region == NULL) { 
         USER_PANIC("Page fault occurred at an unmapped region: %p\n", faulting_address);
         return;
     }
 
-    // If the region is not lazily allocated, raise an error
-    if (region->type != PAGING_REGION_LAZY) {
-        USER_PANIC("Page fault outside lazily allocated region: %p\n", faulting_address);
-        return;
-    }
+    // // If the region is not lazily allocated, raise an error
+    // if (region->type != PAGING_REGION_LAZY) {
+    //     USER_PANIC("Page fault outside lazily allocated region: %p\n", faulting_address);
+    //     return;
+    // }
 
     // Proceed with lazy allocation and mapping
     printf("Allocating and mapping frame for lazily allocated region\n");
 
-    struct capref frame;
-  ;
+    struct capref frame;  
     err = frame_alloc(&frame, region->region_size, NULL); // Allocate a frame
     if (err_is_fail(err)) {
         USER_PANIC("Frame allocation failed: %s\n", err_getstring(err));
+        return;
+    }
+
+    if(region->type == PAGING_REGION_MAPPED) {
+        paging_unmap(get_current_paging_state(),(void *)region->base_addr);
+        err = paging_map_fixed_attr_offset(st, aligned_faulting_address, frame, region->region_size, 0, region->flags);
+        region->type = PAGING_REGION_LAZY;
         return;
     }
 

@@ -69,6 +69,9 @@ struct spawninfo {
     struct capref l1_cap;
     struct cnoderef l1_cnode;
     struct cnoderef l2_cnodes[ROOTCN_SLOTS_USER];
+    struct capref selfep_cap;
+    struct capref argspage_cap;
+    struct capref earlymem_cap;
 
     // VSPACE STUFF
     struct capref l0pagetable;

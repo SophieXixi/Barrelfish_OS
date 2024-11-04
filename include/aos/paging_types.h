@@ -93,6 +93,8 @@ struct paging_state {
     struct mapped_region *mapped_list; 
     struct thread_mutex paging_mutex;
     struct thread_mutex heap_mutex;
+    int add_slot;
+    int curr_slot;
 
     /// virtual address from which to allocate from.
     /// TODO(M2): replace me with proper region management

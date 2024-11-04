@@ -22,6 +22,9 @@ __BEGIN_DECLS
 
 errval_t morecore_init(size_t alignment);
 void morecore_use_optimal(void);
+void *morecore_alloc(size_t bytes, size_t *retbytes);
+
+
 
 __END_DECLS
 
