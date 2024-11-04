@@ -347,7 +347,7 @@ printf("  dispframe: %p\n", get_cap_addr(cspace));
     assert(get_croot_addr(dispatcher) == CPTR_ROOTCN);
     assert(capref_is_null(cspace) || get_croot_addr(cspace) == CPTR_ROOTCN);
     assert(capref_is_null(domdispatcher) || get_croot_addr(domdispatcher) == CPTR_ROOTCN);
-    //assert(capref_is_null(vspace) || get_croot_addr(vspace) == get_cap_addr(cspace));
+    assert(capref_is_null(vspace) || get_croot_addr(vspace) == get_cap_addr(cspace));
     assert(capref_is_null(dispframe) || get_croot_addr(dispframe) == get_cap_addr(cspace));
 
     capaddr_t root_caddr = get_cap_addr(cspace);

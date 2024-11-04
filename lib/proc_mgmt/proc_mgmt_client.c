@@ -74,6 +74,7 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
  */
 errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domainid_t *pid)
 {
+    printf("DID IT CALL THIS OR NO");
     struct aos_rpc *chan = aos_rpc_get_process_channel();
     return aos_rpc_proc_spawn_with_cmdline(chan, cmdline, core, pid);
 }

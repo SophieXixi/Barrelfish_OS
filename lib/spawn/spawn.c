@@ -276,7 +276,7 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     // CREATE ROOT CAP
     si->l1_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
     si->l1_cap.slot = TASKCN_SLOT_ROOTCN;
-    si->l1_cap.cnode.croot = CPTR_ROOTCN;
+    // si->l1_cap.cnode.croot = CPTR_ROOTCN;
 
     cap_copy(si->l1_cap, l1_cap);
 
@@ -291,7 +291,7 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     si->argspage_cap = (struct capref){
         .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
         .slot = TASKCN_SLOT_ARGSPAGE,
-        .cnode.croot = CPTR_ROOTCN
+        // .cnode.croot = CPTR_ROOTCN
     };
     err = cap_copy(si->argspage_cap, argspage);
     if (err_is_fail(err)) {
@@ -341,7 +341,7 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
     // Create the L0 VNode in the child's CSpace
     si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
     si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 tables
-        si->childl0_pagetable.cnode.croot = CPTR_ROOTCN;  // Assign first slot for L0 tables
+    si->childl0_pagetable.cnode.croot = CPTR_ROOTCN;  // Assign first slot for L0 tables
 
     printf("Allocated child pagetable_cap slot");
 
@@ -698,9 +698,9 @@ errval_t spawn_start(struct spawninfo *si)
     }
     printf("Process is ready \n");
 
-    si->dispatcher.cnode.croot = CPTR_ROOTCN;
-    si->l1_cap.cnode.croot = CPTR_ROOTCN;
-    si->dispframe.cnode.croot = CPTR_ROOTCN;
+    // si->dispatcher.cnode.croot = CPTR_ROOTCN;
+    // si->l1_cap.cnode.croot = CPTR_ROOTCN;
+    // si->dispframe.cnode.croot = CPTR_ROOTCN;
 
 
 
