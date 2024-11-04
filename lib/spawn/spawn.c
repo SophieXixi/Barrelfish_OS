@@ -648,7 +648,7 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
     disp_gen->eh_frame_size=0;
     disp_gen->eh_frame_hdr=0;
     disp_gen->eh_frame_hdr_size=0;
-    si->disp = (dispatcher_handle_t)child_buffer;
+    si->disp = (dispatcher_handle_t)parent_buffer;
     printf("finsh set up dispatcher\n");
 
     // copy the capref to the child
