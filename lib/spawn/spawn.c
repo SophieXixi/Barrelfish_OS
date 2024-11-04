@@ -580,12 +580,12 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
     }
     printf("finished slot alloc for dispatcher\n");
     // create a parent dispatcher frame
-    struct capref parent_disp;
-    err = dispatcher_create(parent_disp);
+    err = dispatcher_create(disp);
     if (err_is_fail(err)) {
         printf("failed to create dispatcher\n");
         return SPAWN_ERR_DISPATCHER_SETUP;
     }
+    struct capref parent_disp;
     err = frame_alloc(&parent_disp, DISPATCHER_FRAME_SIZE, NULL);
     if (err_is_fail(err)) {
         printf("fail to allocate a dispatcher for parent process\n");
