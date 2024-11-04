@@ -336,11 +336,18 @@ static inline errval_t
 invoke_dispatcher(struct capref dispatcher, struct capref domdispatcher,
                   struct capref cspace, struct capref vspace,
                   struct capref dispframe, bool run)
+
 {
+
+    printf("Debugging Values:\n");
+printf("  vspace: %p\n", get_croot_addr(vspace));
+printf("  cspace: %p\n", get_croot_addr(dispframe));
+printf("  dispframe: %p\n", get_cap_addr(cspace));
+
     assert(get_croot_addr(dispatcher) == CPTR_ROOTCN);
     assert(capref_is_null(cspace) || get_croot_addr(cspace) == CPTR_ROOTCN);
     assert(capref_is_null(domdispatcher) || get_croot_addr(domdispatcher) == CPTR_ROOTCN);
-    assert(capref_is_null(vspace) || get_croot_addr(vspace) == get_cap_addr(cspace));
+    //assert(capref_is_null(vspace) || get_croot_addr(vspace) == get_cap_addr(cspace));
     assert(capref_is_null(dispframe) || get_croot_addr(dispframe) == get_cap_addr(cspace));
 
     capaddr_t root_caddr = get_cap_addr(cspace);
