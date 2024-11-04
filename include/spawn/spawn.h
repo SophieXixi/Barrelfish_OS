@@ -63,18 +63,11 @@ struct spawninfo {
     lvaddr_t mapped_elf;
     genvaddr_t entry_addr;
     struct mem_region *module;              ///< Program entry point
-    genvaddr_t entry_addr;
-    struct mem_region *module;              ///< Program entry point
-
 
     // L1 CNODE REPRESENTING CSPACE
     struct capref l1_cap;
-    struct capref l1_cap;
     struct cnoderef l1_cnode;
     struct cnoderef l2_cnodes[ROOTCN_SLOTS_USER];
-    struct capref selfep_cap;
-    struct capref argspage_cap;
-    struct capref earlymem_cap;
     struct capref selfep_cap;
     struct capref argspage_cap;
     struct capref earlymem_cap;
@@ -89,7 +82,6 @@ struct spawninfo {
     struct capref dispframe;
     struct capref dispatcher;
 
-    // list of children processes (if this process spawns children)
     // list of children processes (if this process spawns children)
     struct spawninfo **children;
     size_t num_children;
