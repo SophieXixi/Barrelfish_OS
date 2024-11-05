@@ -164,6 +164,15 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
     }
     printf("Process loaded successfully for PID %u\n", *pid);
 
+    si.state = SPAWN_STATE_READY;
+    err = spawn_start(&si);
+    if (err_is_fail(err)) {
+        debug_printf("Error Starting process: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("Process running successfully for PID %u\n", *pid);
+
+
 
     // Optional: Update proc_manager with the new process
     // Ensure memory for `processes` array is allocated or reallocated

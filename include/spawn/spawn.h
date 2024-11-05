@@ -83,8 +83,12 @@ struct spawninfo {
 
     // DISPATCHER STUFF:
     dispatcher_handle_t disp;
-    struct capref dispframe;
-    struct capref dispatcher;
+
+    struct capref dispframe_parent;
+    struct capref dispatcher_parent;
+    struct capref dispframe_child;
+    struct capref dispatcher_child;
+
 
     // list of children processes (if this process spawns children)
     struct spawninfo **children;
