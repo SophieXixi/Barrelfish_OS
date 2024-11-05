@@ -171,19 +171,26 @@ errval_t ram_alloc_init(void)
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CAP_IDENTIFY);
     }
+    printf("Made it past cap_direct_identify\n");
 
     if (cap.type != ObjType_RAM) {
         printf("Early memory cap is not a RAM cap\n");
         return LIB_ERR_RAM_ALLOC;
     }
+    printf("Made it past cap type asserion\n");
+
 
     if (cap.u.ram.bytes < 1024 * 1024) {
         printf("Early memory cap is too small\n");
         return LIB_ERR_RAM_ALLOC;
     }
+    printf("Made it past cap ram bytes\n");
+
 
     ram_alloc_state->early_alloc_size   = cap.u.ram.bytes;
     ram_alloc_state->early_alloc_offset = 0;
+
+    printf("Made it to end of ram func\n");
 
     return SYS_ERR_OK;
 }

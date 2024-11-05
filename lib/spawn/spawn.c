@@ -317,14 +317,28 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     };
 
 
-    struct capref some_ram;
-    err = ram_alloc(&some_ram, BASE_PAGE_SIZE * 256); // TODO CHECK THE SIZE
+struct capref earlymem_cap;
+si->earlymem_cap = (struct capref){
+    .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+    .slot = TASKCN_SLOT_EARLYMEM
+};
 
-    struct capref child_earlymem = {
-        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-        .slot  = TASKCN_SLOT_EARLYMEM
-    };
-    err = cap_copy(child_earlymem, some_ram);
+err = cap_copy(earlymem_cap, si->earlymem_cap);
+
+
+err = ram_alloc(&earlymem_cap, BASE_PAGE_SIZE);
+if (err_is_fail(err)) {
+    debug_printf("Failed to allocate early memory: %s\n", err_getstring(err));
+    return err;
+}
+
+//err = cap_copy(si->earlymem_cap, earlymem_cap);
+if (err_is_fail(err)) {
+    debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
+    return err;
+} else {
+    debug_printf("EARLYMEM capability successfully copied to TASKCN_SLOT_EARLYMEM.\n");
+}
 
         printf("CSPACE setup for child completed.\n");
     return SYS_ERR_OK;

@@ -128,7 +128,6 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         return err_push(err, LIB_ERR_SLOT_ALLOC_INIT);
     }
 
-    // Initialize ram_alloc state
     err = ram_alloc_init();
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RAM_ALLOC_INIT);
@@ -139,11 +138,12 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         return err_push(err, LIB_ERR_VSPACE_INIT);
     }
 
-
     err = morecore_init(BASE_PAGE_SIZE);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_MORECORE_INIT);
     }
+
+
 
     lmp_endpoint_init();
 
