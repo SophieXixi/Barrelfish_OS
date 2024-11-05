@@ -157,7 +157,7 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
     // Call spawn_load_with_bootinfo to load the process
     printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
     // si.core_id = my_core_id;
-    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline, *pid);
+    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline, 1);
     if (err_is_fail(err)) {
         debug_printf("Error loading process: %s\n", err_getstring(err));
         return err;

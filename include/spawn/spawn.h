@@ -82,7 +82,7 @@ struct spawninfo {
     struct single_slot_allocator single_slot_alloc;
 
     // DISPATCHER STUFF:
-    dispatcher_handle_t disp;
+    dispatcher_handle_t handle;
 
     struct capref dispframe_parent;
     struct capref dispatcher_parent;
