@@ -207,7 +207,7 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
     // Call spawn_load_with_bootinfo to load the process
     printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
     // si.core_id = my_core_id;
-    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline, 1);
+    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline,*pid);
     if (err_is_fail(err)) {
         debug_printf("Error loading process: %s\n", err_getstring(err));
         return err;
@@ -221,8 +221,6 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
         return err;
     }
     printf("Process running successfully for PID %u\n", *pid);
-
-
 
     // Optional: Update proc_manager with the new process
     // Ensure memory for `processes` array is allocated or reallocated
@@ -258,11 +256,15 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
     // Initialize `spawninfo` structure
     struct spawninfo si;
     printf("si initialized");
+    struct mem_region *module = multiboot_find_module(bi, path);
+    const char *cmdline = multiboot_module_opts(module);
+
+
    
     // Call spawn_load_with_bootinfo to load the process
     printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
     // si.core_id = my_core_id;
-    errval_t err = spawn_load_with_bootinfo(&si, bi, path, 1);
+    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline, 1);
     if (err_is_fail(err)) {
         debug_printf("Error loading process: %s\n", err_getstring(err));
         return err;

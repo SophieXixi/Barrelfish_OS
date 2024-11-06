@@ -91,8 +91,12 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     // TODO: Implement me
 
     // - Get the module from the multiboot image
-    struct mem_region *module = multiboot_find_module(bi, name);
-    printf("Module found for %s at base address: 0x%lx\n", name, module->mr_base);
+    char module_name[128];
+    sscanf(name, "%127s", module_name); 
+    struct mem_region *module = multiboot_find_module(bi, module_name);
+    printf("Module found for %s at base address: 0x%lx\n", module_name, module->mr_base);
+    printf("STRING USED%s\n", name);
+
 
     struct capref child_frame = {
         .cnode = cnode_module,
@@ -119,26 +123,34 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
 
 
     // - Fill in argc/argv from the multiboot command line
-    const char *cmdline = multiboot_module_opts(module);
+    //const char *cmdline = multiboot_module_opts(module);
     int argc;  // `argc` is declared without being initialized
     char *buf = NULL;  // `buf` is initialized to NULL
-    char **argv = make_argv(cmdline, &argc, &buf);  // `make_argv` will set `argc` and `buf`
+    char **argv = make_argv(name, &argc, &buf);
     if (!argv) {
         debug_printf("Error: Failed to parse arguments from command line\n");
         return SPAWN_ERR_CREATE_ARGSPG;
     }
-    printf("Created arguments argc and argv\n");
+    printf("Created arguments argc = %d\n", argc);
+
+    // Print out each argument to verify
+    for (int i = 0; i < argc; i++) {
+        printf("argv[%d]: %s\n", i, argv[i]);
+    }
+
+    // Allocate and copy the binary name
     si->binary_name = malloc(strlen((char*)argv[0]) + 1);
     if (si->binary_name == NULL) {
         debug_printf("malloc failed\n");
         abort();
     }
     strcpy(si->binary_name, (char*) argv[0]);
+
+    // Proceed with finding the .got section header
     struct Elf64_Shdr *got_section_header = elf64_find_section_header_name((genvaddr_t)si->mapped_elf, si->module->mrmod_size, ".got");
     printf("found section header initial%d\n", *got_section_header);
 
-
-    // - Call spawn_load_with_args
+    // Call spawn_load_with_args
     err = spawn_load_with_args(si, &img, argc, (const char **)argv, pid);
 
     (void)err;
@@ -242,7 +254,7 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     setup_args(si, argc, argv);
 
     
-    return LIB_ERR_NOT_IMPLEMENTED;
+    return SYS_ERR_OK;
 }
 
 // --- Step-by-Step Helper Functions ---
