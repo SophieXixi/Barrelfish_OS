@@ -135,6 +135,7 @@ struct process_manager {
     struct proc_status **processes; // Dynamic array for multiple processes
     size_t num_processes;        // Number of active processes
     domainid_t next_pid; // Next available PID for a new process
+    struct spawn_info *spawn_info_list;
 };
 
 
@@ -303,4 +304,4 @@ errval_t proc_mgmt_killall(const char *name);
 
 __END_DECLS
 
-#endif  // LIB_PROC_MGMT_H_
+#endif  // LIB_PROC_MGMT_H_;

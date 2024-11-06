@@ -101,6 +101,9 @@ struct spawninfo {
     struct spawninfo **children;
     size_t num_children;
 
+    // linkedlist for proc_mgmt
+    struct spawninfo* next;
+
 };
 
 

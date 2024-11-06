@@ -28,7 +28,6 @@
 #include "proc_mgmt.h"
 
 
-
 extern struct bootinfo *bi;
 extern coreid_t         my_core_id;
 struct process_manager *proc_manager;
@@ -111,7 +110,6 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     (void)core;
     (void)pid;
 
-    USER_PANIC("functionality not implemented\n");
     // TODO:
     //  - find the image
     //  - allocate a PID
@@ -120,6 +118,58 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     //  - keep track of the spawned process
     //
     // Note: With multicore support, you many need to send a message to the other core
+
+    errval_t err;
+    struct spawninfo * si;
+    if (proc_manager->spawn_info_list == NULL) {
+        si = (struct spawninfo *) malloc(sizeof(struct spawninfo));
+        if (si == NULL) {
+        USER_PANIC("malloc fail in proc_mgmt_spawn_with_caps\n");
+    }
+        struct spawninfo *curr;
+        for (curr = si; curr->next; curr!= NULL) {
+        // traverse to the end of the list
+        }
+        
+    } else {
+        si = proc_manager->spawn_info_list;
+    }
+    
+    
+
+    si = curr;
+    struct elfimg ei;
+   
+    if (si->next == NULL) {
+        si->pid = 1;
+    } else {
+        si->pid = si->next->pid + 1;
+    }
+    root = si;
+    struct mem_region* module = multiboot_find_module(bi, argv[0]);
+    if (module == NULL) {
+        // debug_printf("multiboot_find_module failed to find %s\n", argv[0]);
+        //*pid = SPAWN_ERR_PID;
+        return SPAWN_ERR_FIND_MODULE;
+    }
+
+    // added line bellow
+    si->module = module;
+
+    elfimg_init_from_module(&ei, module);
+    err = spawn_load_with_caps(si, &ei, argc, argv, capc, capv, si->pid);
+    if (err_is_fail(err)) {
+        USER_PANIC("spaw");
+    }
+    err = spawn_start(si);
+    DEBUG_ERR_ON_FAIL(err, "couldn't start loaded process\n");
+    *pid = si->pid;
+   
+
+    return SYS_ERR_OK;
+
+    USER_PANIC("functionality not implemented\n");
+    
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
