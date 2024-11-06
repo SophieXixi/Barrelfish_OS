@@ -945,6 +945,7 @@ static struct sysret handle_idcap_identify(struct capability *cap,
 static struct sysret handle_cap_identify(struct capability *root,
                                          arch_registers_state_t *context, int argc)
 {
+    
     assert(4 == argc);
 
     struct registers_aarch64_syscall_args* sa = &context->syscall_args;

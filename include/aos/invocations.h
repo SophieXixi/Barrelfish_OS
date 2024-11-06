@@ -251,11 +251,27 @@ static inline errval_t invoke_cap_identify(struct capref cap,
                                            struct capability *ret)
 {
     struct capref croot = get_croot_capref(cap);
-    return cap_invoke4(croot, CNodeCmd_CapIdentify,
-                       get_cap_addr(cap), get_cap_level(cap),
-                       (uintptr_t)ret).error;
-}
 
+    // Debugging information for the capability identification
+    printf("Invoking capability identify:\n");
+    printf("  Root cap: croot.cnode = %u, croot.slot = %u\n", croot.cnode, croot.slot);
+    printf("  Capability address: 0x%lx\n", get_cap_addr(cap));
+    printf("  Capability level: %u\n", get_cap_level(cap));
+    printf("  Return structure address: %p\n", (void*)ret);
+
+    errval_t err = cap_invoke4(croot, CNodeCmd_CapIdentify,
+                               get_cap_addr(cap), get_cap_level(cap),
+                               (uintptr_t)ret).error;
+
+    // Check and print result of the invocation
+    if (err_is_fail(err)) {
+        printf("cap_invoke4 failed with error: %s\n", err_getstring(err));
+    } else {
+        printf("Capability identification successful.\n");
+    }
+
+    return err;
+}
 static inline errval_t invoke_vnode_identify(struct capref vnode,
 					     struct vnode_identity *ret)
 {
@@ -337,6 +353,7 @@ invoke_dispatcher(struct capref dispatcher, struct capref domdispatcher,
                   struct capref cspace, struct capref vspace,
                   struct capref dispframe, bool run)
 {
+
     assert(get_croot_addr(dispatcher) == CPTR_ROOTCN);
     assert(capref_is_null(cspace) || get_croot_addr(cspace) == CPTR_ROOTCN);
     assert(capref_is_null(domdispatcher) || get_croot_addr(domdispatcher) == CPTR_ROOTCN);

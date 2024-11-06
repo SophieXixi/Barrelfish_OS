@@ -204,21 +204,42 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
  */
 errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pid)
 {
-    // make compiler happy about unused parameters
-    (void)path;
-    (void)core;
-    (void)pid;
+    (void) core;
+    // Initialize `spawninfo` structure
+    struct spawninfo si;
+    printf("si initialized");
+   
+    // Call spawn_load_with_bootinfo to load the process
+    printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
+    // si.core_id = my_core_id;
+    errval_t err = spawn_load_with_bootinfo(&si, bi, path, 1);
+    if (err_is_fail(err)) {
+        debug_printf("Error loading process: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("Process loaded successfully for PID %u\n", *pid);
 
-    USER_PANIC("functionality not implemented\n");
-    // TODO:
+    si.state = SPAWN_STATE_READY;
+    err = spawn_start(&si);
+    if (err_is_fail(err)) {
+        debug_printf("Error Starting process: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("Process running successfully for PID %u\n", *pid);
+
+
+    // Optional: Update proc_manager with the new process
+    // Ensure memory for `processes` array is allocated or reallocated
+    // and add `&si` to `proc_manager->processes`
+
     //  - find the image
     //  - allocate a PID
     //  - use the spawn library to construct a new process
     //  - start the new process
     //  - keep track of the spawned process
-    //
-    // Note: With multicore support, you many need to send a message to the other core
-    return LIB_ERR_NOT_IMPLEMENTED;
+
+
+    return SYS_ERR_OK;
 }
 
 

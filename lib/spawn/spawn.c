@@ -265,74 +265,135 @@ static errval_t initialize_spawn_info(struct spawninfo *si, const char *binary_n
 static errval_t setup_child_cspace(struct spawninfo *si)
 {
     struct capref l1_cap;
-    // Step 1: Create the L1 CNode for the child’s CSpace
+    // Step 1: CREATING L1 AND L2 CNODES
     errval_t err = cnode_create_l1(&l1_cap, &si->l1_cnode);
     if (err_is_fail(err)) {
         debug_printf("Error creating L1 CNode %s\n", err_getstring(err));
         debug_printf("Error creating L1 CNode %s\n", err_getstring(err));
         return err;
     }
+    si->l1_cap = l1_cap;
     printf("Created L1 CNode\n");
 
-    struct capref cap_l1_slot_cnode;
-    cap_l1_slot_cnode.cnode = si->l1_cnode,
-    cap_l1_slot_cnode.slot = TASKCN_SLOT_ROOTCN,
-    err = cap_copy(cap_l1_slot_cnode, l1_cap);
-
-    // Step 3: Create and link L2 CNodes in the child’s CSpace
     for (size_t i = 0; i < ROOTCN_SLOTS_USER; ++i) {
-        // Create an L2 CNode in the parent CSpace but to be used by the child
         err = cnode_create_foreign_l2(l1_cap, i, &si->l2_cnodes[i]);
         if (err_is_fail(err)) {
             debug_printf("Error creating foreign L2 CNode: %s\n", err_getstring(err));
             return err;
         }
-
     }
 
-    si->l1_cap = l1_cap;
+    printf("Make capabilities for the L2 CNODES\n");
+    si->slot_alloc0_cap = (struct capref){
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_SLOT_ALLOC0    
+     };
 
-    // Step 7: Allocate ARGSPAGE and copy to child
-    struct capref argspage;
-    err = frame_alloc(&argspage, BASE_PAGE_SIZE, NULL);
-    if (err_is_fail(err)) {
-        debug_printf("Failed to allocate ARGSPAGE: %s\n", err_getstring(err));
-        return err;
-    }
-    si->argspage_cap = (struct capref){
-        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-        .slot = TASKCN_SLOT_ARGSPAGE
+    si->slot_alloc1_cap = (struct capref){
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_SLOT_ALLOC1    
     };
-    err = cap_copy(si->argspage_cap, argspage);
-    if (err_is_fail(err)) {
-        debug_printf("Failed to copy ARGSPAGE to child: %s\n", err_getstring(err));
-        return err;
-    }
 
-    // Step 8: Allocate EARLYMEM and copy to child
+    si->slot_alloc2_cap = (struct capref){
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_SLOT_ALLOC2
+    };
 
     si->pagecn_cap = (struct capref){
         .cnode = si->l1_cnode,
         .slot = ROOTCN_SLOT_PAGECN
     };
 
+    si->taskcn_cap = (struct capref){ 
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_TASKCN
+    };
 
-struct capref earlymem_cap;
-si->earlymem_cap = (struct capref){
-    .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-    .slot = TASKCN_SLOT_EARLYMEM
-};
-
-err = cap_copy(earlymem_cap, si->earlymem_cap);
+    si->taskcn_root = (struct capref){ 
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_ROOTCN
+    };
+    err = cap_copy(si->taskcn_root, l1_cap);
 
 
-err = ram_alloc(&earlymem_cap, BASE_PAGE_SIZE);
-if (err_is_fail(err)) {
-    debug_printf("Failed to allocate early memory: %s\n", err_getstring(err));
-    return err;
-}
 
-//err = cap_copy(si->earlymem_cap, earlymem_cap);
+    // Step 7: Allocate ARGSPAGE and copy to child
+    // struct capref argspage;
+    // err = frame_alloc(&argspage, BASE_PAGE_SIZE, NULL);
+    // if (err_is_fail(err)) {
+    //     debug_printf("Failed to allocate ARGSPAGE: %s\n", err_getstring(err));
+    //     return err;
+    // }
+    // si->argspage_cap = (struct capref){
+    //     .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+    //     .slot = TASKCN_SLOT_ARGSPAGE
+    // };
+    // err = cap_copy(si->argspage_cap, argspage);
+    // if (err_is_fail(err)) {
+    //     debug_printf("Failed to copy ARGSPAGE to child: %s\n", err_getstring(err));
+    //     return err;
+    // }
+
+
+    struct capref earlymem_cap;
+
+    err = ram_alloc(&earlymem_cap, BASE_PAGE_SIZE * 1024);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to allocate early memory: %s\n", err_getstring(err));
+        return err;
+    }
+    // Set up the destination cap in the child’s CSpace
+    si->earlymem_cap = (struct capref){
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_EARLYMEM
+    };
+
+    // Copy the EARLYMEM cap to the child’s CSpace
+    err = cap_copy(si->earlymem_cap, earlymem_cap);
+    if (err_is_fail(err)) { 
+        debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
+        return err;
+    }
+
+
+    struct capref croot = get_croot_capref(si->earlymem_cap);
+    struct capability cap;
+    printf("si->earlymem_cap details:\n");
+    printf("  si->earlymem_cap slot: %d\n", si->earlymem_cap.slot);
+    printf("  si->earlymem_cap cnode: %d\n", si->earlymem_cap.cnode);
+    printf("  si->earlymem_cap cnode cnode: %d\n", si->earlymem_cap.cnode.cnode);
+    printf("  si->earlymem_cap cnode croot: %d\n", si->earlymem_cap.cnode.croot);
+    printf("  si->earlymem_cap cnode level: %d\n", si->earlymem_cap.cnode.level);
+
+    printf("  cnode_task cnode: %d\n", cnode_task.cnode);
+    printf("  cnode_task croot: %d\n", cnode_task.croot);
+    printf("  cnode_task croot: %d\n", cnode_task.level);
+
+    cnode_task = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
+    printf("  cnode_task cnode: %d\n", cnode_task.cnode);
+    printf("  cnode_task croot: %d\n", cnode_task.croot);
+    printf("  cnode_task croot: %d\n", cnode_task.level);
+
+
+    err = cap_direct_identify(si->earlymem_cap, &cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CAP_IDENTIFY);
+    }
+
+
+    printf("SPAWN Invoking capability identify:\n");
+    printf("  Root cap: croot.cnode = %u, croot.slot = %u\n", croot.cnode, croot.slot);
+    printf("  Capability address: 0x%lx\n", get_cap_addr(si->earlymem_cap));
+    printf("  Capability level: %u\n", get_cap_level(si->earlymem_cap));
+
+
+    // Confirm the EARLYMEM capability was copied successfully
+    debug_printf("EARLYMEM cap copied successfully to child CSpace: CNode = %d, Slot = %d\n",
+                si->earlymem_cap.cnode.croot, si->earlymem_cap.slot);
+
+
+
+
 if (err_is_fail(err)) {
     debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
     return err;
@@ -352,11 +413,9 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
     size_t bufsize = SINGLE_SLOT_ALLOC_BUFLEN(L2_CNODE_SLOTS);
     void *buf = malloc(bufsize);
     assert(buf != NULL);
-    printf("Debugging inputs to single_slot_alloc_init_raw:\n");
 
     printf("  &si->single_slot_alloc: %p\n", (void*)&si->single_slot_alloc);
 
-    printf("  si->pagecn_cap: cnode = %u, slot = %u\n", si->pagecn_cap.cnode, si->pagecn_cap.slot);
 
     printf("  si->l2_cnodes[ROOTCN_SLOT_PAGECN]: cnode = %u, slot = %u\n", 
         si->l2_cnodes[ROOTCN_SLOT_PAGECN].cnode, si->l2_cnodes[ROOTCN_SLOT_PAGECN].croot);
@@ -365,23 +424,15 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
     errval_t err = single_slot_alloc_init_raw(&si->single_slot_alloc, si->pagecn_cap,
                                               si->l2_cnodes[ROOTCN_SLOT_PAGECN], L2_CNODE_SLOTS, buf, bufsize);
 
+
     struct capref l0_pagetable_cap;
-    err = slot_alloc(&l0_pagetable_cap);  // Allocate a slot in the parent CSpace
+    err = si->single_slot_alloc.a.alloc(&si->single_slot_alloc.a, &l0_pagetable_cap);  // Allocate a slot in the parent CSpace
     if (err_is_fail(err)) {
         debug_printf("Failed to allocate slot for L0 page table: %s\n", err_getstring(err));
         return err;
     }
-    printf("Allocated parent pagetable_cap slot");
-    err = si->single_slot_alloc.a.alloc(&si->single_slot_alloc.a, &si->childl0_pagetable);
 
-
-    // Create the L0 VNode in the child's CSpace
-    si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
-    si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 tables
-    printf("Allocated child pagetable_cap slot");
-
-    err = vnode_create(si->childl0_pagetable, ObjType_VNode_AARCH64_l0);
-    cap_copy(l0_pagetable_cap, si->childl0_pagetable);
+    err = vnode_create(l0_pagetable_cap, ObjType_VNode_AARCH64_l0);
     printf("VNODE CREATE AND COPY");
 
     si->paging_state = malloc(sizeof(struct paging_state));
@@ -391,11 +442,16 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
         }
     printf("MALLOC succeeded\n");
 
-    err = paging_init_state_foreign(si->paging_state, VADDR_OFFSET, si->childl0_pagetable, get_default_slot_allocator());
+    err = paging_init_state_foreign(si->paging_state, VADDR_OFFSET, l0_pagetable_cap, get_default_slot_allocator());
     if (err_is_fail(err)) {
         debug_printf("Failed to initialize child paging state: %s\n", err_getstring(err));
         return err;
     }
+
+
+    si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
+    si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 tables
+    cap_copy(si->childl0_pagetable, l0_pagetable_cap);
 
     printf("Child paging state initialized successfully\n");
     return SYS_ERR_OK;
@@ -471,9 +527,11 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
     }
 
     struct capref selfep;
-    selfep.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-    selfep.slot = TASKCN_SLOT_SELFEP,
     err = cap_retype(selfep, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+
+    si->selfep_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
+    si->selfep_cap.slot = TASKCN_SLOT_SELFEP;
+    cap_copy(si->selfep_cap, selfep);
 
     // Allocate dispatcher frame for parent
     struct capref dispframe_parent;
