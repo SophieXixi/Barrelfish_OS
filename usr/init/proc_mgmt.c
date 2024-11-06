@@ -75,6 +75,52 @@ __attribute__((__used__)) static void spawn_info_to_proc_status(struct spawninfo
     }
 }
 
+void initialize_process_manager(struct process_manager ** pm);
+struct process_node * allocate_process_node(struct process_manager *manager);
+
+struct process_node * allocate_process_node(struct process_manager *manager) {
+    printf("get in allocate pm node\n");
+    if (manager->head == NULL) {
+        printf("get in allocate_process_node when head null\n");
+        manager->head = malloc(sizeof(struct process_node));
+        manager->head->si = malloc(sizeof(struct spawninfo));
+        manager->head->next = NULL;
+        manager->head->processes = malloc(sizeof(struct proc_status));
+        printf("getting out allocate_process_node when head null\n");
+        return manager->head;
+    } else {
+         printf("head is not null\n");
+        struct process_node * curr = manager->head;
+        while(curr->next!=NULL) {
+            curr = curr->next;
+        }
+        curr->next = malloc(sizeof(struct process_node));
+        curr->next->si = malloc(sizeof(struct spawninfo));
+        curr->next->next = NULL;
+        curr->next->processes = malloc(sizeof(struct proc_status));
+        return curr->next;
+
+    }
+}
+
+void initialize_process_manager(struct process_manager ** pm) {
+    if (*pm == NULL) {
+        *pm = malloc(sizeof(struct process_manager));
+    if (*pm == NULL) {
+        printf("Failed to allocate memory for process manager\n");
+        return; // Handle memory allocation failure if needed
+    }
+
+    (*pm)->next_pid = 0;
+    (*pm)->num_processes = 0;
+    (*pm)->head = NULL;
+
+    printf("Initialization successful\n");
+    } else {
+        printf("shouldn't init\n");
+    }
+    
+}
 
 
 /*
@@ -119,64 +165,18 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     //
     // Note: With multicore support, you many need to send a message to the other core
 
-    errval_t err;
-    struct spawninfo * si;
-    if (proc_manager->spawn_info_list == NULL) {
-        si = (struct spawninfo *) malloc(sizeof(struct spawninfo));
-        if (si == NULL) {
-        USER_PANIC("malloc fail in proc_mgmt_spawn_with_caps\n");
-    }
-        struct spawninfo *curr;
-        for (curr = si; curr->next; curr!= NULL) {
-        // traverse to the end of the list
-        }
-        
-    } else {
-        si = proc_manager->spawn_info_list;
-    }
     
-    
-
-    si = curr;
-    struct elfimg ei;
-   
-    if (si->next == NULL) {
-        si->pid = 1;
-    } else {
-        si->pid = si->next->pid + 1;
-    }
-    root = si;
-    struct mem_region* module = multiboot_find_module(bi, argv[0]);
-    if (module == NULL) {
-        // debug_printf("multiboot_find_module failed to find %s\n", argv[0]);
-        //*pid = SPAWN_ERR_PID;
-        return SPAWN_ERR_FIND_MODULE;
-    }
-
-    // added line bellow
-    si->module = module;
-
-    elfimg_init_from_module(&ei, module);
-    err = spawn_load_with_caps(si, &ei, argc, argv, capc, capv, si->pid);
-    if (err_is_fail(err)) {
-        USER_PANIC("spaw");
-    }
-    err = spawn_start(si);
-    DEBUG_ERR_ON_FAIL(err, "couldn't start loaded process\n");
-    *pid = si->pid;
-   
 
     return SYS_ERR_OK;
 
-    USER_PANIC("functionality not implemented\n");
     
-    return LIB_ERR_NOT_IMPLEMENTED;
 }
 
 /**
  * @brief function to allocate a unique PID for each process
  */
 domainid_t allocate_pid(struct process_manager *manager) {
+    
     if (manager->next_pid == 0) {
         // Avoid returning 0 as a PID, which may represent an invalid state
         manager->next_pid++;
@@ -201,21 +201,31 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
     (void)core;
 
     // Initialize `spawninfo` structure
-    struct spawninfo si;
+    //struct spawninfo si;
     printf("si initialized");
-   
+
     // Call spawn_load_with_bootinfo to load the process
     printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
     // si.core_id = my_core_id;
-    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline,*pid);
+    initialize_process_manager(&proc_manager);
+    *pid =  allocate_pid(proc_manager);
+    struct process_node *pro_node=  allocate_process_node(proc_manager);
+    printf("successful allocate pro_node\n");
+    pro_node->processes->core = core;
+    pro_node->processes->pid = *pid;
+    pro_node->processes->state = PROC_STATE_SPAWNING;
+    pro_node->processes->exit_code = 0;
+    
+    printf("allocate new PID in spawn with cmdline%u\n", *pid);
+    errval_t err = spawn_load_with_bootinfo(pro_node->si, bi, cmdline,*pid);
     if (err_is_fail(err)) {
         debug_printf("Error loading process: %s\n", err_getstring(err));
         return err;
     }
     printf("Process loaded successfully for PID %u\n", *pid);
 
-    si.state = SPAWN_STATE_READY;
-    err = spawn_start(&si);
+    pro_node->si->state = SPAWN_STATE_READY;
+    err = spawn_start(pro_node->si);
     if (err_is_fail(err)) {
         debug_printf("Error Starting process: %s\n", err_getstring(err));
         return err;
@@ -238,6 +248,7 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
 
 
 
+
 /**
  * @brief spawns a new process with the default arguments on the given core
  *
@@ -254,25 +265,34 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
 {
     (void) core;
     // Initialize `spawninfo` structure
-    struct spawninfo si;
+    //struct spawninfo si;
+
     printf("si initialized");
     struct mem_region *module = multiboot_find_module(bi, path);
     const char *cmdline = multiboot_module_opts(module);
 
 
-   
     // Call spawn_load_with_bootinfo to load the process
     printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
     // si.core_id = my_core_id;
-    errval_t err = spawn_load_with_bootinfo(&si, bi, cmdline, 1);
+    initialize_process_manager(&proc_manager);
+    *pid =  allocate_pid(proc_manager);
+    struct process_node *pro_node=  allocate_process_node(proc_manager);
+    pro_node->processes->core = core;
+    pro_node->processes->pid = *pid;
+    pro_node->processes->state = PROC_STATE_SPAWNING;
+    pro_node->processes->exit_code = 0;
+
+    errval_t err = spawn_load_with_bootinfo(pro_node->si, bi, cmdline, *pid);
     if (err_is_fail(err)) {
         debug_printf("Error loading process: %s\n", err_getstring(err));
         return err;
     }
     printf("Process loaded successfully for PID %u\n", *pid);
+    
 
-    si.state = SPAWN_STATE_READY;
-    err = spawn_start(&si);
+    pro_node->si->state = SPAWN_STATE_READY;
+    err = spawn_start(pro_node->si);
     if (err_is_fail(err)) {
         debug_printf("Error Starting process: %s\n", err_getstring(err));
         return err;
@@ -342,10 +362,53 @@ errval_t proc_mgmt_get_proc_list(domainid_t **pids, size_t *num)
     (void)pids;
     (void)num;
 
-    USER_PANIC("functionality not implemented\n");
+    struct process_node *curr = proc_manager->head;
+    size_t count = 0;
+
+    if (curr == NULL) {
+        return SPAWN_ERR_FIND_SPAWNDS;
+    }
+    while (curr!= NULL) {
+        spawn_info_to_proc_status(curr->si,curr->processes);
+        if (curr->processes->state == PROC_STATE_RUNNING) {
+            count++;
+        }
+        curr = curr->next;
+    }
+
+     while (curr != NULL) {
+        spawn_info_to_proc_status(curr->si, curr->processes);
+        if (curr->processes->state == PROC_STATE_RUNNING) {
+            count++;
+        }
+        curr = curr->next;
+    }
+
+    // Allocate memory for the list of PIDs
+    *pids = malloc(count * sizeof(domainid_t));
+    if (*pids == NULL) {
+        return SPAWN_ERR_FIND_SPAWNDS; // Return an error if memory allocation fails
+    }
+
+    // Reset the iterator and populate the PID list
+    curr = proc_manager->head;
+    size_t index = 0;
+    while (curr != NULL) {
+        spawn_info_to_proc_status(curr->si, curr->processes);
+        if (curr->processes->state == PROC_STATE_RUNNING) {
+            (*pids)[index++] = curr->processes->pid;
+        }
+        curr = curr->next;
+    }
+
+    // Set the number of running processes
+    *num = count;
+
+    return SYS_ERR_OK;
+    
     // TODO:
     //  - consult the process table to obtain a list of PIDs of the processes in the system
-    return LIB_ERR_NOT_IMPLEMENTED;
+
 }
 
 
@@ -383,14 +446,32 @@ errval_t proc_mgmt_get_pid_by_name(const char *name, domainid_t *pid)
  */
 errval_t proc_mgmt_get_status(domainid_t pid, struct proc_status *status)
 {
-    // make compiler happy about unused parameters
-    (void)pid;
-    (void)status;
+    // Check if proc_manager and the head of the list are initialized
+    if (proc_manager == NULL || proc_manager->head == NULL) {
+        printf("Process manager not initialized or no processes in the list\n");
+        return SPAWN_ERR_FIND_SPAWNDS;  // Return an error indicating no processes found
+    }
 
-    USER_PANIC("functionality not implemented\n");
-    // TODO:
-    //   - get the status of the process with the given PID
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Traverse the linked list of processes
+    struct process_node *current = proc_manager->head;
+    while (current != NULL) {
+        spawn_info_to_proc_status(current->si, current->processes);
+        if (current->processes->pid == pid) {
+            // Process with the given PID found, populate the status struct
+            status->core = current->processes->core;
+            status->pid = current->processes->pid;
+            status->state = current->processes->state;
+            status->exit_code = current->processes->exit_code;
+            strncpy(status->cmdline, current->processes->cmdline, sizeof(status->cmdline));
+
+            return SYS_ERR_OK;  // Successfully found and populated the status
+        }
+        current = current->next;
+    }
+
+    // Process with the given PID was not found
+    printf("Process with PID %u not found\n", pid);
+    return SPAWN_ERR_FIND_SPAWNDS;  // Return an error indicating the PID was not found
 }
 
 

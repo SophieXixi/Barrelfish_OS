@@ -24,6 +24,7 @@
 #include <sys/cdefs.h>
 #include <errors/errno.h>
 #include <barrelfish_kpi/types.h>
+#include <spawn/spawn.h>
 
 __BEGIN_DECLS
 
@@ -132,12 +133,21 @@ struct proc_status {
 
 
 struct process_manager {
-    struct proc_status **processes; // Dynamic array for multiple processes
+    //struct proc_status **processes; // Dynamic array for multiple processes
     size_t num_processes;        // Number of active processes
     domainid_t next_pid; // Next available PID for a new process
-    struct spawn_info *spawn_info_list;
+    struct process_node *head; // spawn_info list
 };
 
+
+struct process_node {
+    struct proc_status *processes;
+    struct spawninfo *si;
+    struct process_node *next;
+    //char *name;
+
+    //add more fields if needed
+};
 
 
 /**
