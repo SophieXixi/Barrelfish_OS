@@ -203,7 +203,6 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
         USER_PANIC("spawn_load_with_caps err\n");
     }
 
-    // added line bellow
     pro_node->si->module = module;
     pro_node->si->child_frame_id = child_frame_id;
     pro_node->si->mapped_elf = mapped_elf;
@@ -397,10 +396,52 @@ errval_t proc_mgmt_ps(struct proc_status **ps, size_t *num)
     (void)ps;
     (void)num;
 
-    USER_PANIC("functionality not implemented\n");
+    
     // TODO:
     //  - consult the process table to obtain the status of the processes
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Ensure the process manager and head of the list are initialized
+    if (proc_manager == NULL || proc_manager->head == NULL) {
+        printf("Process manager not initialized or no processes in the list\n");
+        *ps = NULL;
+        *num = 0;
+        return SPAWN_ERR_FIND_SPAWNDS;  // Return an error if no processes are found
+    }
+
+    // First pass: Count the number of processes in the list
+    size_t count = 0;
+    struct process_node *current = proc_manager->head;
+    while (current != NULL) {
+        spawn_info_to_proc_status(current->si, current->processes);
+        count++;
+        current = current->next;
+    }
+
+    // Allocate memory for the array of process statuses
+    *ps = malloc(count * sizeof(struct proc_status));
+    if (*ps == NULL) {
+        printf("Memory allocation for process status array failed\n");
+        *num = 0;
+        return SPAWN_ERR_FIND_SPAWNDS;
+    }
+
+    // Second pass: Populate the array with each process's status
+    current = proc_manager->head;
+    size_t index = 0;
+    while (current != NULL) {
+
+        (*ps)[index].core = current->processes->core;
+        (*ps)[index].pid = current->processes->pid;
+        (*ps)[index].state = current->processes->state;
+        (*ps)[index].exit_code = current->processes->exit_code;
+        strncpy((*ps)[index].cmdline, current->processes->cmdline, sizeof((*ps)[index].cmdline));
+        index++;
+        current = current->next;
+    }
+
+    // Set the number of processes
+    *num = count;
+
+    return SYS_ERR_OK;  // Indicate success
 }
 
 
@@ -488,7 +529,6 @@ errval_t proc_mgmt_get_pid_by_name(const char *name, domainid_t *pid)
     (void)name;
     (void)pid;
 
-    USER_PANIC("functionality not implemented\n");
     // TODO:
     //   - lookup the process with the given name in the process table
     return LIB_ERR_NOT_IMPLEMENTED;
@@ -507,12 +547,13 @@ errval_t proc_mgmt_get_status(domainid_t pid, struct proc_status *status)
     // Check if proc_manager and the head of the list are initialized
     if (proc_manager == NULL || proc_manager->head == NULL) {
         printf("Process manager not initialized or no processes in the list\n");
-        return SPAWN_ERR_FIND_SPAWNDS;  // Return an error indicating no processes found
+        return SPAWN_ERR_FIND_SPAWNDS;  // Return an error if no processes are found
     }
 
     // Traverse the linked list of processes
     struct process_node *current = proc_manager->head;
     while (current != NULL) {
+        // Check if the full command line matches
         spawn_info_to_proc_status(current->si, current->processes);
         if (current->processes->pid == pid) {
             // Process with the given PID found, populate the status struct
@@ -524,6 +565,7 @@ errval_t proc_mgmt_get_status(domainid_t pid, struct proc_status *status)
 
             return SYS_ERR_OK;  // Successfully found and populated the status
         }
+
         current = current->next;
     }
 
@@ -549,10 +591,35 @@ errval_t proc_mgmt_get_name(domainid_t pid, char *name, size_t len)
     (void)name;
     (void)len;
 
-    USER_PANIC("functionality not implemented\n");
+
     // TODO:
     //   - get the name of the process with the given PID
-    return LIB_ERR_NOT_IMPLEMENTED;
+     // Check if the process manager and head of the list are initialized
+    if (proc_manager == NULL || proc_manager->head == NULL) {
+        printf("Process manager not initialized or no processes in the list\n");
+        name = NULL;
+        return SYS_ERR_OK;  // Return an error if no processes are found
+    }
+
+    // Traverse the linked list of processes
+    struct process_node *current = proc_manager->head;
+    while (current != NULL) {
+        spawn_info_to_proc_status(current->si, current->processes);
+        // Check if the PID matches
+        if (current->si->pid == pid) {
+            // Found the process, copy its name to the buffer
+            strncpy(name, current->si->cmdline, len - 1);
+            name[len - 1] = '\0';  // Ensure null termination
+
+            return SYS_ERR_OK;  // Successfully found and copied the name
+        }
+        current = current->next;
+    }
+
+    // Process with the given PID was not found
+    printf("Process with PID %u not found\n", pid);
+    name = NULL;
+    return SYS_ERR_OK;
 }
 
 
