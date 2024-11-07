@@ -435,8 +435,26 @@ errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot,
     pt_alloc(st, type, &(parent->children[slot]->self));
 
 
+    struct capref parent_mapping;
+    struct capref parent_dest;
+    struct capref parent_src;
+
+
+    bool is_child = (st != get_current_paging_state());
+    if (is_child) {
+        slot_alloc(&parent_mapping);
+        slot_alloc(&parent_dest);
+        slot_alloc(&parent_src);
+        cap_copy(parent_mapping, mapping);
+        cap_copy(parent_dest, parent->self);
+        cap_copy(parent_src, parent->children[slot]->self);
+    } else {
+        parent_mapping = mapping;
+        parent_dest = parent->self;
+        parent_src = parent->children[slot]->self;
+    }
     // Now, proceed with the mapping.
-    err = vnode_map(parent->self, parent->children[slot]->self, slot, VREGION_FLAGS_READ_WRITE, offset, pte_ct, mapping);
+    err = vnode_map(parent_dest, parent_src, slot, VREGION_FLAGS_READ_WRITE, offset, pte_ct, parent_mapping);
     if (err_is_fail(err)) {
         debug_printf("vnode_map failed: %s\n", err_getstring(err));
         return err;
@@ -512,13 +530,6 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
             vnode_cap = st->root->self;
         }
 
-        if(is_child) {
-            if(l0_idx == 511) {
-                l0_idx = 0;
-            } else {
-                l0_idx++;
-            }
-        }
 
         // Allocate and initialize page tables (L1, L2, L3) if necessary
         if (st->root->children[l0_idx] == NULL) {
@@ -563,9 +574,30 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
         // Map the maximum number of pages that can fit into the L3 page table
         pages_mapped = MIN((int)(NUM_PT_SLOTS - l3_idx), remaining_pages);
         debug_printf("Number of pages mapped: %d\n", pages_mapped);
-        result = vnode_map(st->root->children[l0_idx]->children[l1_idx]->children[l2_idx]->self, 
-                           frame, VMSAv8_64_L3_INDEX(vaddr), flags, offset + (BASE_PAGE_SIZE * (total_pages - remaining_pages)), 
-                           pages_mapped, map_slot);
+
+        struct capref parent_mapping;
+        struct capref parent_dest;
+        struct capref parent_src;
+
+
+        if (is_child) {
+            slot_alloc(&parent_mapping);
+            slot_alloc(&parent_dest);
+            slot_alloc(&parent_src);
+            cap_copy(parent_mapping, map_slot);
+            cap_copy(parent_dest, st->root->children[l0_idx]->children[l1_idx]->children[l2_idx]->self);
+            cap_copy(parent_src, frame);
+        } else {
+            parent_mapping = map_slot;
+            parent_dest = st->root->children[l0_idx]->children[l1_idx]->children[l2_idx]->self;
+            parent_src = frame;
+        }
+
+
+
+        result = vnode_map(parent_dest, 
+                           parent_src, VMSAv8_64_L3_INDEX(vaddr), flags, offset + (BASE_PAGE_SIZE * (total_pages - remaining_pages)), 
+                           pages_mapped, parent_mapping);
         if (err_is_fail(result)) {
             if (is_child) cap_destroy(vnode_cap);
             printf("vnode_map failed during leaf node mapping: %s\n", err_getstring(result));

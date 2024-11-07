@@ -83,6 +83,16 @@
                 },
                 {
                     "action" : "expect",
+                    "pass" : ["<grading> Hello, world! from userspace \\(1\\)"],
+                    "fail" : ["<grading> TEST FAILED:  P1-5" ]
+                },
+                {
+                    "action" : "expect",
+                    "pass" : ["<grading> argv\\[0\\] = hello"],
+                    "fail" : ["<grading> TEST FAILED:  P1-5" ]
+                },
+                {
+                    "action" : "expect",
                     "pass" : ["# DONE:  Milestone 3 \\(Process Management\\)"],
                     "fail" : [ ]
                 }

@@ -69,10 +69,17 @@ struct spawninfo {
     struct capref l1_cap;
     struct cnoderef l1_cnode;
     struct cnoderef l2_cnodes[ROOTCN_SLOTS_USER];
+    struct capref taskcn_cap;
+    struct capref pagecn_cap;
+    struct capref slot_alloc0_cap;
+    struct capref slot_alloc1_cap;
+    struct capref slot_alloc2_cap;
+
+    // TASKCN SLOT CAPS
     struct capref selfep_cap;
     struct capref argspage_cap;
     struct capref earlymem_cap;
-    struct capref pagecn_cap;
+    struct capref taskcn_root;
 
 
     // VSPACE STUFF
@@ -82,13 +89,19 @@ struct spawninfo {
     struct single_slot_allocator single_slot_alloc;
 
     // DISPATCHER STUFF:
-    dispatcher_handle_t disp;
-    struct capref dispframe;
-    struct capref dispatcher;
+    dispatcher_handle_t handle;
+
+    struct capref dispframe_parent;
+    struct capref dispatcher_parent;
+    struct capref dispframe_child;
+    struct capref dispatcher_child;
+
 
     // list of children processes (if this process spawns children)
     struct spawninfo **children;
     size_t num_children;
+
+    
 
 };
 

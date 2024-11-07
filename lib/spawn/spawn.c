@@ -90,10 +90,13 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
 
     // TODO: Implement me
 
-
     // - Get the module from the multiboot image
-    struct mem_region *module = multiboot_find_module(bi, name);
-    printf("Module found for %s at base address: 0x%lx\n", name, module->mr_base);
+    char module_name[128];
+    sscanf(name, "%127s", module_name); 
+    struct mem_region *module = multiboot_find_module(bi, module_name);
+    printf("Module found for %s at base address: 0x%lx\n", module_name, module->mr_base);
+    printf("STRING USED%s\n", name);
+
 
     struct capref child_frame = {
         .cnode = cnode_module,
@@ -120,20 +123,42 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
 
 
     // - Fill in argc/argv from the multiboot command line
-    const char *cmdline = multiboot_module_opts(module);
+    //const char *cmdline = multiboot_module_opts(module);
     int argc;  // `argc` is declared without being initialized
     char *buf = NULL;  // `buf` is initialized to NULL
-    char **argv = make_argv(cmdline, &argc, &buf);  // `make_argv` will set `argc` and `buf`
+    char **argv = make_argv(name, &argc, &buf);
     if (!argv) {
         debug_printf("Error: Failed to parse arguments from command line\n");
         return SPAWN_ERR_CREATE_ARGSPG;
     }
-    printf("Created arguments argc and argv\n");
+    printf("Created arguments argc = %d\n", argc);
 
-    // - Call spawn_load_with_args
+    // Print out each argument to verify
+    for (int i = 0; i < argc; i++) {
+        printf("argv[%d]: %s\n", i, argv[i]);
+    }
+
+    // Allocate and copy the binary name
+    si->binary_name = malloc(strlen((char*)argv[0]) + 1);
+    if (si->binary_name == NULL) {
+        debug_printf("malloc failed\n");
+        abort();
+    }
+    strcpy(si->binary_name, (char*) argv[0]);
+    printf("BINARY NAME: %s\n", si->binary_name);
+
+
+    // Proceed with finding the .got section header
+    struct Elf64_Shdr *got_section_header = elf64_find_section_header_name((genvaddr_t)si->mapped_elf, si->module->mrmod_size, ".got");
+    printf("found section header initial%d\n", *got_section_header);
+
+    // Call spawn_load_with_args
     err = spawn_load_with_args(si, &img, argc, (const char **)argv, pid);
 
     (void)err;
+    printf("SPAWN ENTRY ADDRESS: %p\n", (void*)si->entry_addr);
+
+
     return SYS_ERR_OK;
 }
 
@@ -202,6 +227,17 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     }
     printf("DONE SETTING UP CSPACE\n");
 
+    // Copy the caps passed in to L2CNode[ROOTCN_SLOT_ALLOC_0]
+    for (int i = 0; i < capc; i++) {
+        struct capref temp;
+        temp.cnode = si->l2_cnodes[ROOTCN_SLOT_SLOT_ALLOC0];
+        temp.slot = (cslot_t) i;
+        err = cap_copy(temp, caps[i]);
+        if (err_is_fail(err)) {
+            USER_PANIC("copying caps passed into child fail: %s\n", err_getstring(err));
+        }
+    }
+
     // Step 3: Initialize child's VSpace and load ELF
     err = initialize_child_vspace(si);
     if (err_is_fail(err)) {
@@ -210,11 +246,13 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     }
     printf("DONE SETTING UP VSPACE\n");
     (void)img;
+    printf("SPAWN ENTRY ADDRESS: %p\n", (void*)si->entry_addr);
 
     // Step 4: Load the ELF image into the child's VSpace
     err = elf_load(EM_AARCH64, allocate_child_frame, si->paging_state, si->mapped_elf,
                    si->module->mrmod_size, &si->entry_addr);
-    printf("LOADED THE ELF 1");
+                       printf("SPAWN ENTRY ADDRESS: %p\n", (void*)si->entry_addr);
+
     if (err_is_fail(err)) {
         debug_printf("Failed to load ELF: %s\n", err_getstring(err));
         return err;
@@ -229,7 +267,7 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     setup_args(si, argc, argv);
 
     
-    return LIB_ERR_NOT_IMPLEMENTED;
+    return SYS_ERR_OK;
 }
 
 // --- Step-by-Step Helper Functions ---
@@ -238,7 +276,7 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
 static errval_t initialize_spawn_info(struct spawninfo *si, const char *binary_name, domainid_t pid)
 {
     si->pid = pid;
-    si->binary_name = (char *)binary_name;
+    //si->binary_name = (char *)binary_name;
     si->cmdline = (char *)binary_name;
     si->state = SPAWN_STATE_SPAWNING;
     si->exitcode = 0;
@@ -252,102 +290,176 @@ static errval_t initialize_spawn_info(struct spawninfo *si, const char *binary_n
 static errval_t setup_child_cspace(struct spawninfo *si)
 {
     struct capref l1_cap;
-    // Step 1: Create the L1 CNode for the child’s CSpace
+    // Step 1: CREATING L1 AND L2 CNODES
     errval_t err = cnode_create_l1(&l1_cap, &si->l1_cnode);
     if (err_is_fail(err)) {
         debug_printf("Error creating L1 CNode %s\n", err_getstring(err));
         debug_printf("Error creating L1 CNode %s\n", err_getstring(err));
         return err;
     }
+    si->l1_cap = l1_cap;
     printf("Created L1 CNode\n");
 
-    // Step 3: Create and link L2 CNodes in the child’s CSpace
     for (size_t i = 0; i < ROOTCN_SLOTS_USER; ++i) {
-        // Create an L2 CNode in the parent CSpace but to be used by the child
         err = cnode_create_foreign_l2(l1_cap, i, &si->l2_cnodes[i]);
 
         if (err_is_fail(err)) {
             debug_printf("Error creating foreign L2 CNode: %s\n", err_getstring(err));
             return err;
         }
-
     }
 
-    // CREATE ROOT CAP
-    si->l1_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
-    si->l1_cap.slot = TASKCN_SLOT_ROOTCN;
-    // si->l1_cap.cnode.croot = CPTR_ROOTCN;
+    printf("Make capabilities for the L2 CNODES\n");
+    si->slot_alloc0_cap = (struct capref){
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_SLOT_ALLOC0    
+     };
 
-    cap_copy(si->l1_cap, l1_cap);
-
-
-    // Step 7: Allocate ARGSPAGE and copy to child
-    struct capref argspage;
-    err = frame_alloc(&argspage, BASE_PAGE_SIZE, NULL);
-    if (err_is_fail(err)) {
-        debug_printf("Failed to allocate ARGSPAGE: %s\n", err_getstring(err));
-        return err;
-    }
-    si->argspage_cap = (struct capref){
-        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-        .slot = TASKCN_SLOT_ARGSPAGE,
-        // .cnode.croot = CPTR_ROOTCN
+    si->slot_alloc1_cap = (struct capref){
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_SLOT_ALLOC1    
     };
-    err = cap_copy(si->argspage_cap, argspage);
-    if (err_is_fail(err)) {
-        debug_printf("Failed to copy ARGSPAGE to child: %s\n", err_getstring(err));
-        return err;
-    }
 
-    // Step 8: Allocate EARLYMEM and copy to child
-    struct capref earlymem;
-    err = ram_alloc(&earlymem, BASE_PAGE_SIZE * 4); // Adjust size as necessary
-    if (err_is_fail(err)) {
-        debug_printf("Failed to allocate EARLYMEM: %s\n", err_getstring(err));
-        return err;
-    }
-    si->earlymem_cap = (struct capref){
-        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-        .slot = TASKCN_SLOT_EARLYMEM
+    si->slot_alloc2_cap = (struct capref){
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_SLOT_ALLOC2
     };
-    err = cap_copy(si->earlymem_cap, earlymem);
-    if (err_is_fail(err)) {
-        debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
-        return err;
-    }
 
     si->pagecn_cap = (struct capref){
         .cnode = si->l1_cnode,
         .slot = ROOTCN_SLOT_PAGECN
     };
 
-    printf("CSPACE setup for child completed.\n");
+    si->taskcn_cap = (struct capref){ 
+        .cnode = si->l1_cnode,
+        .slot = ROOTCN_SLOT_TASKCN
+    };
+
+    si->taskcn_root = (struct capref){ 
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_ROOTCN
+    };
+    err = cap_copy(si->taskcn_root, l1_cap);
+
+
+
+    // Step 7: Allocate ARGSPAGE and copy to child
+    // struct capref argspage;
+    // err = frame_alloc(&argspage, BASE_PAGE_SIZE, NULL);
+    // if (err_is_fail(err)) {
+    //     debug_printf("Failed to allocate ARGSPAGE: %s\n", err_getstring(err));
+    //     return err;
+    // }
+    // si->argspage_cap = (struct capref){
+    //     .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+    //     .slot = TASKCN_SLOT_ARGSPAGE
+    // };
+    // err = cap_copy(si->argspage_cap, argspage);
+    // if (err_is_fail(err)) {
+    //     debug_printf("Failed to copy ARGSPAGE to child: %s\n", err_getstring(err));
+    //     return err;
+    // }
+
+
+    struct capref earlymem_cap;
+
+    err = ram_alloc(&earlymem_cap, BASE_PAGE_SIZE * 1024);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to allocate early memory: %s\n", err_getstring(err));
+        return err;
+    }
+    // Set up the destination cap in the child’s CSpace
+    si->earlymem_cap = (struct capref){
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_EARLYMEM
+    };
+
+    // Copy the EARLYMEM cap to the child’s CSpace
+    err = cap_copy(si->earlymem_cap, earlymem_cap);
+    if (err_is_fail(err)) { 
+        debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
+        return err;
+    }
+
+
+    struct capref croot = get_croot_capref(si->earlymem_cap);
+    struct capability cap;
+    printf("si->earlymem_cap details:\n");
+    printf("  si->earlymem_cap slot: %d\n", si->earlymem_cap.slot);
+    printf("  si->earlymem_cap cnode: %d\n", si->earlymem_cap.cnode);
+    printf("  si->earlymem_cap cnode cnode: %d\n", si->earlymem_cap.cnode.cnode);
+    printf("  si->earlymem_cap cnode croot: %d\n", si->earlymem_cap.cnode.croot);
+    printf("  si->earlymem_cap cnode level: %d\n", si->earlymem_cap.cnode.level);
+
+    printf("  cnode_task cnode: %d\n", cnode_task.cnode);
+    printf("  cnode_task croot: %d\n", cnode_task.croot);
+    printf("  cnode_task croot: %d\n", cnode_task.level);
+
+    cnode_task = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
+    printf("  cnode_task cnode: %d\n", cnode_task.cnode);
+    printf("  cnode_task croot: %d\n", cnode_task.croot);
+    printf("  cnode_task croot: %d\n", cnode_task.level);
+
+
+    err = cap_direct_identify(si->earlymem_cap, &cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CAP_IDENTIFY);
+    }
+
+
+    printf("SPAWN Invoking capability identify:\n");
+    printf("  Root cap: croot.cnode = %u, croot.slot = %u\n", croot.cnode, croot.slot);
+    printf("  Capability address: 0x%lx\n", get_cap_addr(si->earlymem_cap));
+    printf("  Capability level: %u\n", get_cap_level(si->earlymem_cap));
+
+
+    // Confirm the EARLYMEM capability was copied successfully
+    debug_printf("EARLYMEM cap copied successfully to child CSpace: CNode = %d, Slot = %d\n",
+                si->earlymem_cap.cnode.croot, si->earlymem_cap.slot);
+
+
+
+
+
+if (err_is_fail(err)) {
+    debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
+    return err;
+} else {
+    debug_printf("EARLYMEM capability successfully copied to TASKCN_SLOT_EARLYMEM.\n");
+}
+
+        printf("CSPACE setup for child completed.\n");
     return SYS_ERR_OK;
+
 }
 
 // Step 3: Initialize the child's VSpace
 static errval_t initialize_child_vspace(struct spawninfo *si)
 {   
     (void)si;
+    size_t bufsize = SINGLE_SLOT_ALLOC_BUFLEN(L2_CNODE_SLOTS);
+    void *buf = malloc(bufsize);
+    assert(buf != NULL);
+
+    printf("  &si->single_slot_alloc: %p\n", (void*)&si->single_slot_alloc);
+
+
+    printf("  si->l2_cnodes[ROOTCN_SLOT_PAGECN]: cnode = %u, slot = %u\n", 
+        si->l2_cnodes[ROOTCN_SLOT_PAGECN].cnode, si->l2_cnodes[ROOTCN_SLOT_PAGECN].croot);
+
+
+    errval_t err = single_slot_alloc_init_raw(&si->single_slot_alloc, si->pagecn_cap,
+                                              si->l2_cnodes[ROOTCN_SLOT_PAGECN], L2_CNODE_SLOTS, buf, bufsize);
+
 
     struct capref l0_pagetable_cap;
-    errval_t err = slot_alloc(&l0_pagetable_cap);  // Allocate a slot in the parent CSpace
+    err = si->single_slot_alloc.a.alloc(&si->single_slot_alloc.a, &l0_pagetable_cap);  // Allocate a slot in the parent CSpace
     if (err_is_fail(err)) {
         debug_printf("Failed to allocate slot for L0 page table: %s\n", err_getstring(err));
         return err;
     }
-    printf("Allocated parent pagetable_cap slot");
 
-    // Create the L0 VNode in the child's CSpace
-    si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
-    si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 tables
-    si->childl0_pagetable.cnode.croot = CPTR_ROOTCN;  // Assign first slot for L0 tables
-
-    printf("Allocated child pagetable_cap slot");
-
-
-    err = vnode_create(si->childl0_pagetable, ObjType_VNode_AARCH64_l0);
-    cap_copy(l0_pagetable_cap, si->childl0_pagetable);
+    err = vnode_create(l0_pagetable_cap, ObjType_VNode_AARCH64_l0);
     printf("VNODE CREATE AND COPY");
 
     si->paging_state = malloc(sizeof(struct paging_state));
@@ -357,12 +469,16 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
         }
     printf("MALLOC succeeded\n");
 
-
-    err = paging_init_state_foreign(si->paging_state, BASE_PAGE_SIZE, si->childl0_pagetable, get_default_slot_allocator());
+    err = paging_init_state_foreign(si->paging_state, VADDR_OFFSET, l0_pagetable_cap, get_default_slot_allocator());
     if (err_is_fail(err)) {
         debug_printf("Failed to initialize child paging state: %s\n", err_getstring(err));
         return err;
     }
+
+
+    si->childl0_pagetable.cnode = si->l2_cnodes[ROOTCN_SLOT_PAGECN];  // Set child’s L0 location
+    si->childl0_pagetable.slot = PAGECN_SLOT_VROOT;  // Assign first slot for L0 tables
+    cap_copy(si->childl0_pagetable, l0_pagetable_cap);
 
     printf("Child paging state initialized successfully\n");
     return SYS_ERR_OK;
@@ -375,11 +491,13 @@ errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_
     (void)state;
     (void)base;
     (void)flags;
+    void *retval;
+
 
     // Step 1: Calculate offset and adjust base and size for page alignment
-    size_t offset = BASE_PAGE_OFFSET(base);
-    base -= offset;
-    size = ROUND_UP(size + offset, BASE_PAGE_SIZE);
+    genvaddr_t init_base = base;
+    base = ROUND_DOWN(base, BASE_PAGE_SIZE);
+    size = ROUND_UP(base + size, BASE_PAGE_SIZE) - base;
 
     // Step 2: Allocate a frame for the required size
     struct capref frame;
@@ -398,7 +516,7 @@ errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_
     printf("Mapped frame in child's virtual address space at fixed address: 0x%lx\n", base);
 
     // Step 4: Use morecore_alloc to allocate memory in the parent’s address space for ELF loading
-    err = paging_map_frame(get_current_paging_state(), ret, size, frame);
+    err = paging_map_frame(get_current_paging_state(), &retval, size, frame);
     if (err_is_fail(err)) {
         debug_printf("Failed to map frame at fixed address in parent address space: %s\n", err_getstring(err));
         return err;
@@ -407,226 +525,128 @@ errval_t allocate_child_frame(void *state, genvaddr_t base, size_t size, uint32_
 
     // Step 5: Adjust `ret` by `offset` so that it points to the correct location
     // Debug information
+    *ret = retval + (init_base - base);
     printf("Mapped address in parent (ret): %p\n", *ret);
-    printf("Offset (alignment difference): %lu\n", offset);
     printf("size of what we just mapped: %p\n", size);
     return SYS_ERR_OK;
 }
 
 
-
-// // setup dispatcher function
-// static errval_t setup_dispatcher(struct spawninfo *si)
-// {
-//     errval_t err;
-//     // Allocate slot for dispatcher capability
-//     err = slot_alloc(&si->dispatcher_cap);
-//     printf("Slot allocated for dispatcher capability.\n");
-//     if (err_is_fail(err)) {
-//         debug_printf("Failed to allocate slot for dispatcher capability: %s\n", err_getstring(err));
-//         return err;
-//     }
-//     err = dispatcher_create(si->dispatcher_cap);
-//     printf("Dispatcher created.\n");
-//     if (err_is_fail(err)) {
-//         debug_printf("Failed to create dispatcher: %s\n", err_getstring(err));
-//         return err;
-//     }
-//     // Allocate and retype endpoint
-//     struct capref dispatcher_endpoint;
-//     err = slot_alloc(&dispatcher_endpoint);
-//     printf("Slot allocated for endpoint.\n");
-//     if (err_is_fail(err)) {
-//         debug_printf("Failed to allocate slot for endpoint: %s\n", err_getstring(err));
-//         return err;
-//     }
-//     err = cap_retype(dispatcher_endpoint, si->dispatcher_cap, 0, ObjType_EndPointLMP, 0);
-//     printf("Endpoint retyped.\n");
-//     if (err_is_fail(err)) {
-//         debug_printf("Failed to retype endpoint: %s\n", err_getstring(err));
-//         return err;
-//     }
-//     // Create dispatcher frame capability
-//     size_t retsize;
-//     err = frame_alloc(&si->dispatcher_frame_cap, DISPATCHER_FRAME_SIZE, &retsize);
-//     printf("Dispatcher frame capability created.\n");
-//     if (err_is_fail(err)) {
-//         debug_printf("Failed to allocate dispatcher frame: %s\n", err_getstring(err));
-//         return err;
-//     }
-//     // Copy capabilities to child space
-//     struct capref dispatcher_child = {
-//         .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-//         .slot = TASKCN_SLOT_DISPATCHER
-//     };
-//     cap_copy(dispatcher_child, si->dispatcher_cap);
-//     printf("Dispatcher capability copied to child space.\n");
-//     struct capref selfep = {
-//         .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-//         .slot = TASKCN_SLOT_SELFEP
-//     };
-//     cap_copy(selfep, dispatcher_endpoint);
-//     printf("Self endpoint copied to child space.\n");
-//     // struct capref dispatcher_frame_child = {
-//     //     .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-//     //     .slot = TASKCN_SLOT_DISPFRAME  
-//     // };
-//     // cap_copy(dispatcher_frame_child, si->dispatcher_frame_cap);
-//     printf("Dispatcher frame copied to child space.\n");
-//     // Map dispatcher into child VSpace
-//     void* vaddr_child;
-//     err = paging_map_frame(si->paging_state, &vaddr_child, DISPATCHER_FRAME_SIZE, si->dispatcher_frame_cap);
-//     printf("Dispatcher mapped into child space.\n");
-//     if (err_is_fail(err)) {
-//         debug_printf("Failed to map dispatcher frame to child space: %s\n", err_getstring(err));
-//         return err;
-//     }
-//     // Map dispatcher into parent space
-//     void* parent_vaddr_for_dispatch;
-//     err = paging_map_frame(get_current_paging_state(), &parent_vaddr_for_dispatch, DISPATCHER_FRAME_SIZE, si->dispatcher_frame_cap);
-//     printf("Dispatcher mapped into parent space.\n");
-//     if (err_is_fail(err)) {
-//         debug_printf("Failed to map dispatcher frame to parent space: %s\n", err_getstring(err));
-//         return err;
-//     }
-//     si->dispatcher_handle = (dispatcher_handle_t) parent_vaddr_for_dispatch;
-//     // Initialize dispatcher fields
-//     struct dispatcher_shared_generic *disp = get_dispatcher_shared_generic(si->dispatcher_handle);
-//     struct dispatcher_generic *disp_gen = get_dispatcher_generic(si->dispatcher_handle);
-//     disp_gen->core_id = si->core_id;
-//     disp_gen->domain_id = si->core_id;
-//     disp->udisp = (lvaddr_t) vaddr_child;
-//     disp->disabled = 1;
-//     strncpy(disp->name, "ABDEL DEBUGGING DISPATCHER", DISP_NAME_LEN);
-//     printf("Dispatcher fields initialized.\n");
-//     // Get .got section for setting registers
-//     struct Elf64_Shdr* got_shdr = elf64_find_section_header_name(si->mapped_elf, si->child_frame_id.bytes, ".got");
-//     if (!got_shdr) {
-//         debug_printf("Failed to find .got section\n");
-//         return SPAWN_ERR_LOAD;
-//     }
-//     lvaddr_t got_addr = got_shdr->sh_addr;
-//     printf("GOT section found at address: 0x%lx\n", got_addr);
-//     // Set the registers including the GOT base
-//     armv8_set_registers(si->dispatcher_handle, si->entry_addr, got_addr);
-//     printf("Dispatcher registers set with entry: 0x%lx and GOT base: 0x%lx\n", si->entry_addr, got_addr);
-//     printf("Dispatcher setup completed successfully.\n");
-//     return SYS_ERR_OK;
-// }
-
-
 static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
 {
-    printf("invoking setup dispatcher function\n");
-    struct capref disp;
-    errval_t err;
-    err = slot_alloc(&disp);
+    (void)pid;
+    printf("Invoking setup dispatcher function\n");
+
+    // Allocate slot for dispatcher
+    struct capref dispatcher_parent;
+    errval_t err = slot_alloc(&dispatcher_parent);
     if (err_is_fail(err)) {
-        printf("failed to alloc dispatcher\n");
+        printf("Failed to allocate slot for dispatcher\n");
         return err;
     }
-    printf("finished slot alloc for dispatcher\n");
-    // create a parent dispatcher frame
-    err = dispatcher_create(disp);
-    if (err_is_fail(err)) {
-        printf("failed to create dispatcher\n");
-        return SPAWN_ERR_DISPATCHER_SETUP;
-    }
-    struct capref parent_disp;
-    err = frame_alloc(&parent_disp, DISPATCHER_FRAME_SIZE, NULL);
-    if (err_is_fail(err)) {
-        printf("fail to allocate a dispatcher for parent process\n");
-        return SPAWN_ERR_DISPATCHER_SETUP;
-    }
-    // map the dispatcher frame to both parent and child process
-    void *parent_buffer;
-    void *child_buffer;
-    err = paging_map_frame_attr(get_current_paging_state(), &parent_buffer, DISPATCHER_FRAME_SIZE, parent_disp, VREGION_FLAGS_READ_WRITE);
-        if (err_is_fail(err)) {
-        printf("failed to map dispatcher to parent\n");
-        return SPAWN_ERR_DISPATCHER_SETUP;
-    }
-    err = paging_map_frame_attr(si->paging_state, &child_buffer, DISPATCHER_FRAME_SIZE, parent_disp, VREGION_FLAGS_READ_WRITE);
-        if (err_is_fail(err)) {
-        printf("failed to map dispatcher to child\n");
-        return SPAWN_ERR_DISPATCHER_SETUP;
-    }
-    printf("finished paging map for both parent and child\n");
+    printf("Slot allocated for dispatcher\n");
 
+    // Create dispatcher
+    err = dispatcher_create(dispatcher_parent);
+    if (err_is_fail(err)) {
+        printf("Failed to create dispatcher\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
 
+    struct capref selfep;
+    err = cap_retype(selfep, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+
+    si->selfep_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
+    si->selfep_cap.slot = TASKCN_SLOT_SELFEP;
+    cap_copy(si->selfep_cap, selfep);
+
+    // Allocate dispatcher frame for parent
+    struct capref dispframe_parent;
+    err = frame_alloc(&dispframe_parent, DISPATCHER_FRAME_SIZE, NULL);
+    if (err_is_fail(err)) {
+        printf("Failed to allocate dispatcher frame for parent process\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
+
+    // Map dispatcher frame to parent and child processes
+    void *parent_buffer, *child_buffer;
+    err = paging_map_frame_attr(get_current_paging_state(), &parent_buffer, DISPATCHER_FRAME_SIZE, dispframe_parent, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        printf("Failed to map dispatcher to parent\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
+    err = paging_map_frame_attr(si->paging_state, &child_buffer, DISPATCHER_FRAME_SIZE, dispframe_parent, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        printf("Failed to map dispatcher to child\n");
+        return SPAWN_ERR_DISPATCHER_SETUP;
+    }
+    printf("Dispatcher frame mapped for both parent and child\n");
+
+    // Copy dispatcher cap and frame to child
+    struct capref child_dispcap = { .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN], .slot = TASKCN_SLOT_DISPATCHER };
+    err = cap_copy(child_dispcap, dispatcher_parent);
+    if (err_is_fail(err)) {
+        printf("Failed to copy dispatcher cap to child\n");
+        return err;
+    }
+
+    struct capref child_dispframe = { .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN], .slot = TASKCN_SLOT_DISPFRAME };
+    err = cap_copy(child_dispframe, dispframe_parent);
+    if (err_is_fail(err)) {
+        printf("Failed to copy dispatcher frame to child\n");
+        return err;
+    }
+
+    si->dispatcher_child = child_dispcap;
+    si->dispframe_child = child_dispframe;
+    si->dispatcher_parent = dispatcher_parent;
+    si->dispframe_parent = dispframe_parent;
+
+    // Initialize dispatcher structures
     struct dispatcher_shared_generic *disp_share = get_dispatcher_shared_generic((dispatcher_handle_t)parent_buffer);
     struct dispatcher_generic *disp_gen = get_dispatcher_generic((dispatcher_handle_t)parent_buffer);
     
-    printf("dispatcher generic funcs working\n");
-
-    //arch_registers_state_t *enabled_area = dispatcher_get_enabled_save_area((dispatcher_handle_t)parent_buffer);
+    // arch_registers_state_t *enabled_area = dispatcher_get_enabled_save_area((dispatcher_handle_t)parent_buffer);
     arch_registers_state_t *disabled_area = dispatcher_get_disabled_save_area((dispatcher_handle_t)parent_buffer);
 
-    printf("disabled area\n");
-
-    // core id of the process
+    // Set core and domain IDs
     disp_gen->core_id = disp_get_core_id();
-    disp_gen->domain_id = disp_get_domain_id();
-    printf("core and domain id\n");
-
-    // Virtual address of the dispatcher frame in child’s VSpace 
-    disp_share->udisp = (lvaddr_t)child_buffer;
-    // Start in disabled mode
-    disp_share->disabled = 1;
-    printf("set dispatch fields");
-
-    // A name (for debugging)
-    strncpy(disp_share->name, si->binary_name, DISP_NAME_LEN);
-    printf("Did strncopy");
-
-
-    // find .got section
-
-    struct Elf64_Shdr *got_section_header = elf64_find_section_header_name(si->mapped_elf, si->child_frame_id.bytes, ".got");
-    // Set program counter (where it should start to execute)
-    printf("got the got");
-
-    disabled_area->named.pc = (lvaddr_t)got_section_header->sh_addr;
-    // Initialize offset registers
-    // got_addr is the address of the .got in the child’s VSpace
-    armv8_set_registers((dispatcher_handle_t)parent_buffer, si->entry_addr, got_section_header->sh_addr);
-    // we won’t use error handling frames 
-    disp_gen->eh_frame=0;
-    disp_gen->eh_frame_size=0;
-    disp_gen->eh_frame_hdr=0;
-    disp_gen->eh_frame_hdr_size=0;
-    si->disp = (dispatcher_handle_t)parent_buffer;
-    printf("finsh set up dispatcher\n");
-
-    // copy the capref to the child
-    struct capref child_dispcap = {
-        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-        .slot = TASKCN_SLOT_DISPATCHER };
-    err = cap_copy(child_dispcap, parent_disp);
-    if (err_is_fail(err)) {
-        printf("failed to copy the cap ref from parent to child\n");
-        return err;
-    }
-    // copy the dispatcher frame to child
-    struct capref child_disp = {
-        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-        .slot = TASKCN_SLOT_DISPFRAME
-    };
-    err = cap_copy(child_disp, disp);
-    if (err_is_fail(err)) {
-        printf("failed to copy the dispatcher frame from parent to child\n");
-        return err;
-    }
     disp_gen->domain_id = pid;
-    si->dispatcher = child_dispcap;
-    si->dispframe.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
-    si->dispframe.slot = TASKCN_SLOT_DISPFRAME;
-    err = cap_copy(si->dispframe, parent_disp);
-    si->dispframe = disp;
-    printf("setup dispatcher finished, return to boot\n");
+    printf("PID: %d\n", disp_gen->domain_id);
+    printf("PID: %d\n", pid);
+
+
+    // Set up dispatcher fields
+    disp_share->udisp = (lvaddr_t)child_buffer; // Virtual address in child’s VSpace
+    disp_share->disabled = 1;                   // Start in disabled mode
+    strncpy(disp_share->name, si->binary_name, DISP_NAME_LEN);
+
+    // Find .got section and initialize registers
+    struct Elf64_Shdr *got_section_header = elf64_find_section_header_name((genvaddr_t)si->mapped_elf, si->module->mrmod_size, ".got");
+    printf("found section header%d\n", *got_section_header);
+
+    disabled_area->named.pc = si->entry_addr;
+    printf("disabled area: %p\n", disabled_area->named.pc);
+    printf("si entry address: %p\n", si->entry_addr);
+
+
+
+
+    armv8_set_registers((dispatcher_handle_t)parent_buffer, si->entry_addr, got_section_header->sh_addr);
+
+    // Error handling frames (unused in this case)
+    disp_gen->eh_frame = 0;
+    disp_gen->eh_frame_size = 0;
+    disp_gen->eh_frame_hdr = 0;
+    disp_gen->eh_frame_hdr_size = 0;
+    si->handle = (dispatcher_handle_t)parent_buffer;
+
+
+    printf("Setup dispatcher completed successfully\n");
     return SYS_ERR_OK;
 }
 
+// setup the args and the environment
 // setup the args and the environment
 static errval_t setup_args(struct spawninfo *si, int argc, const char *argv[])
 {
@@ -672,7 +692,7 @@ static errval_t setup_args(struct spawninfo *si, int argc, const char *argv[])
     sdp->argv[argc] = NULL;
     printf("finished setup args, begin to set registers\n");
     // the first argument in the enabled area in the child process is the spawn domain params pointer.
-    registers_set_param(dispatcher_get_enabled_save_area(si->disp), (lvaddr_t)child_args);
+    registers_set_param(dispatcher_get_enabled_save_area(si->handle), (lvaddr_t)child_args);
     printf("finished setup the registers\n");
     return SYS_ERR_OK;
 }
@@ -696,21 +716,13 @@ errval_t spawn_start(struct spawninfo *si)
     if (si->state != SPAWN_STATE_READY) {
         return SPAWN_ERR_RUN;
     }
-    printf("Process is ready \n");
-
-    // si->dispatcher.cnode.croot = CPTR_ROOTCN;
-    // si->l1_cap.cnode.croot = CPTR_ROOTCN;
-    // si->dispframe.cnode.croot = CPTR_ROOTCN;
-
-
-
-    errval_t err = invoke_dispatcher(si->dispatcher, cap_dispatcher, si->l1_cap, si->childl0_pagetable, si->dispframe, true);
+    // !!!
+    errval_t err = invoke_dispatcher(si->dispatcher_parent, cap_dispatcher, si->l1_cap, si->childl0_pagetable, si->dispframe_child, true);
     if (err_is_fail(err)) {
         printf("fail to invoke the dispatcher\n");
         return err;
     }
-    printf("Process has invoked its dispatcher \n");
-
+    printf("INVOKED THE DISPATCHER\n");
     si->state = SPAWN_STATE_RUNNING;
     printf("Process is running \n");
 
@@ -728,18 +740,24 @@ errval_t spawn_start(struct spawninfo *si)
 errval_t spawn_resume(struct spawninfo *si)
 {
     // make compiler happy about unused parameters
-    (void)si;
 
     // TODO:
     //  - check whether the process is in the right state
     //  - resume the execution of the process
     //  - set the state to running
     if (si->state != SPAWN_STATE_SUSPENDED) {
-        return SPAWN_ERR_WRONG_STATE;
+        return SPAWN_ERR_WRONG_STATE;  // The process is not in a state that can be suspended
     }
 
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Stop the execution of the process using its dispatcher capability
+    errval_t err = invoke_dispatcher_resume(si->dispatcher_child);
+    if(err_is_fail(err)) {
+        printf("Error resuming dispatcher");
+        return err;
+    }
+    // Update the state of the process to reflect that it has been killed
+
+    return SYS_ERR_OK;
 }
 
 /**
@@ -751,15 +769,20 @@ errval_t spawn_resume(struct spawninfo *si)
  */
 errval_t spawn_suspend(struct spawninfo *si)
 {
-    // make compiler happy about unused parameters
-    (void)si;
+    // Check if the process is in a state that allows it to be stopped
+    if (si->state != SPAWN_STATE_RUNNING) {
+        return SPAWN_ERR_WRONG_STATE;  // The process is not in a state that can be suspended
+    }
 
-    // TODO:
-    //  - check whether the process is in the right state
-    //  - stop the execution of the process
-    //  - set the state to suspended
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Stop the execution of the process using its dispatcher capability
+    errval_t err = invoke_dispatcher_stop(si->dispatcher_child);
+    if(err_is_fail(err)) {
+        printf("Error stopping dispatcher");
+        return err;
+    }
+    // Update the state of the process to reflect that it has been killed
+
+    return SYS_ERR_OK;
 }
 
 /**
@@ -771,15 +794,22 @@ errval_t spawn_suspend(struct spawninfo *si)
  */
 errval_t spawn_kill(struct spawninfo *si)
 {
-    // make compiler happy about unused parameters
-    (void)si;
 
-    // TODO:
-    //  - check whether the process is in the right state
-    //  - stop the execution of the process
-    //  - set the state to killed
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Check if the process is in a state that allows it to be stopped
+    if (si->state != SPAWN_STATE_RUNNING && si->state != SPAWN_STATE_SUSPENDED) {
+        return SPAWN_ERR_WRONG_STATE;  // The process is not in a state that can be killed
+    }
+
+    // Stop the execution of the process using its dispatcher capability
+    errval_t err = invoke_dispatcher_stop(si->dispatcher_child);
+    if(err_is_fail(err)) {
+        printf("Error stopping dispatcher");
+        return err;
+    }
+    // Update the state of the process to reflect that it has been killed
+    
+
+    return SYS_ERR_OK;
 }
 
 /**

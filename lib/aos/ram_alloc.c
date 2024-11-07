@@ -165,25 +165,41 @@ errval_t ram_alloc_init(void)
 
     // now try to identify the supplied memory capability to get its size
     struct capref mem_cap = { .cnode = cnode_task, .slot = TASKCN_SLOT_EARLYMEM };
+    printf("mem_cap details:\n");
+    printf("  memcap slot: %d\n", mem_cap.slot);
+    printf("  memcap cnode: %d\n", mem_cap.cnode);
+    printf("  memcap cnode cnode: %d\n", mem_cap.cnode.cnode);
+    printf("  memcap cnode croot: %d\n", mem_cap.cnode.croot);
+    printf("  memcap cnode level: %d\n", mem_cap.cnode.level);
+
+
 
     struct capability cap;
+    printf("Cap identify within ram_alloc_init function\n");
     err = cap_direct_identify(mem_cap, &cap);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_CAP_IDENTIFY);
     }
+    printf("Made it past cap_direct_identify\n");
 
     if (cap.type != ObjType_RAM) {
         printf("Early memory cap is not a RAM cap\n");
         return LIB_ERR_RAM_ALLOC;
     }
+    printf("Made it past cap type asserion\n");
+
 
     if (cap.u.ram.bytes < 1024 * 1024) {
         printf("Early memory cap is too small\n");
         return LIB_ERR_RAM_ALLOC;
     }
+    printf("Made it past cap ram bytes\n");
+
 
     ram_alloc_state->early_alloc_size   = cap.u.ram.bytes;
     ram_alloc_state->early_alloc_offset = 0;
+
+    printf("Made it to end of ram func\n");
 
     return SYS_ERR_OK;
 }
