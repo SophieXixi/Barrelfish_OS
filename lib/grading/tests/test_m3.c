@@ -145,6 +145,39 @@ static void spawn_list(void)
     grading_test_pass("P1-4", "passed spawn_list\n");
 }
 
+static void spawn_one_with_caps(void)
+{
+    errval_t err;
+
+    // the core we want to spawn on, our own.
+    coreid_t core = disp_get_core_id();
+
+    grading_printf("spawn_one_with_caps(%s)\n", BINARY_NAME);
+    int argc;  // `argc` is declared without being initialized
+    char *buf = NULL;  // `buf` is initialized to NULL
+    char **argv = make_argv(BINARY_NAME, &argc, &buf);
+
+    struct capref *capv = malloc(sizeof(struct capref));
+    // capv->cnode = cnode_task;
+    // capv->slot = 0;
+    *capv = (struct capref){ 
+        .cnode = cnode_root,
+        .slot = ROOTCN_SLOT_TASKCN
+    };
+
+    domainid_t pid;
+    err = proc_mgmt_spawn_with_caps(argc, (const char**) argv, 1, capv, core, &pid);
+    if (err_is_fail(err)) {
+        grading_test_fail("P1-5", "failed to load: %s\n", err_getstring(err));
+        return;
+    }
+    // Heads up! When you have messaging support, then you may need to handle a
+    // few messages here for the process to start up
+    grading_printf("waiting 2 seconds to give the other domain chance to run...\n");
+    barrelfish_usleep(4000000);
+}
+
+
 errval_t grading_run_tests_processes(void)
 {
     if (grading_options.m3_subtest_run == 0) {
@@ -165,6 +198,7 @@ errval_t grading_run_tests_processes(void)
     spawn_one_with_default_args();
     spawn_one_with_args();
     spawn_list();
+    spawn_one_with_caps();
 
     grading_printf("#################################################\n");
     grading_printf("# DONE:  Milestone 3 (Process Management)        \n");

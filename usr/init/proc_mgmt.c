@@ -164,6 +164,64 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     //  - keep track of the spawned process
     //
     // Note: With multicore support, you many need to send a message to the other core
+    errval_t err;
+    initialize_process_manager(&proc_manager);
+    *pid =  allocate_pid(proc_manager);
+    struct process_node *pro_node=  allocate_process_node(proc_manager);
+    printf("successful allocate pro_node\n");
+    pro_node->processes->core = core;
+    pro_node->processes->pid = *pid;
+    pro_node->processes->state = PROC_STATE_SPAWNING;
+    pro_node->processes->exit_code = 0;
+     printf("allocate new PID in spawn with caps%u\n", *pid);
+
+    pro_node->si->binary_name = malloc(strlen((char*)argv[0]) + 1);
+    strcpy(pro_node->si->binary_name, (char*) argv[0]);
+
+    
+    struct mem_region* module = multiboot_find_module(bi, argv[0]);
+    if (module == NULL) {
+        debug_printf("multiboot_find_module failed to find %s\n", argv[0]);
+        return SPAWN_ERR_FIND_MODULE;
+    }
+
+    struct capref child_frame = {
+        .cnode = cnode_module,
+        .slot = module->mrmod_slot,
+    };
+    // - Map multiboot module in your address space
+    struct frame_identity child_frame_id;
+    err = frame_identify(child_frame, &child_frame_id);
+    if (err_is_fail(err)) {
+        USER_PANIC("spawn_load_with_caps err\n");
+    }
+    lvaddr_t mapped_elf;
+    err = paging_map_frame(get_current_paging_state(), (void**)&mapped_elf,
+                           module->mrmod_size, child_frame);
+    
+    if (err_is_fail(err)) {
+        USER_PANIC("spawn_load_with_caps err\n");
+    }
+
+    // added line bellow
+    pro_node->si->module = module;
+    pro_node->si->child_frame_id = child_frame_id;
+    pro_node->si->mapped_elf = mapped_elf;
+    pro_node->si->pid = *pid;
+
+    struct elfimg img;
+    elfimg_init_from_module(&img, module);
+
+    err = spawn_load_with_caps(pro_node->si, &img, argc, argv, capc, capv, *pid);
+    if (err_is_fail(err)) {
+        USER_PANIC("spawn_load_with_caps err\n");
+    }
+    pro_node->si->state =  SPAWN_STATE_READY;
+
+    err = spawn_start(pro_node->si);
+    if (err_is_fail(err)) {
+        USER_PANIC("spawn_load_with_caps err in spawn_start: %s\n", err_getstring(err));
+    }
 
     
 

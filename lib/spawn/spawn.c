@@ -225,6 +225,17 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     }
     printf("DONE SETTING UP CSPACE\n");
 
+    // Copy the caps passed in to L2CNode[ROOTCN_SLOT_ALLOC_0]
+    for (int i = 0; i < capc; i++) {
+        struct capref temp;
+        temp.cnode = si->l2_cnodes[ROOTCN_SLOT_SLOT_ALLOC0];
+        temp.slot = (cslot_t) i;
+        err = cap_copy(temp, caps[i]);
+        if (err_is_fail(err)) {
+            USER_PANIC("copying caps passed into child fail: %s\n", err_getstring(err));
+        }
+    }
+
     // Step 3: Initialize child's VSpace and load ELF
     err = initialize_child_vspace(si);
     if (err_is_fail(err)) {
@@ -402,6 +413,7 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     // Confirm the EARLYMEM capability was copied successfully
     debug_printf("EARLYMEM cap copied successfully to child CSpace: CNode = %d, Slot = %d\n",
                 si->earlymem_cap.cnode.croot, si->earlymem_cap.slot);
+
 
 
 
