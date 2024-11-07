@@ -144,6 +144,8 @@ struct process_node {
     struct proc_status *processes;
     struct spawninfo *si;
     struct process_node *next;
+    const char *name;
+
     //char *name;
 
     //add more fields if needed

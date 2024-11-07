@@ -176,6 +176,8 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
      printf("allocate new PID in spawn with caps%u\n", *pid);
 
     pro_node->si->binary_name = malloc(strlen((char*)argv[0]) + 1);
+    pro_node->name = malloc(strlen((char*)argv[0]) + 1);
+
     strcpy(pro_node->si->binary_name, (char*) argv[0]);
 
     
@@ -261,6 +263,7 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
     //struct spawninfo si;
     printf("si initialized");
 
+
     // Call spawn_load_with_bootinfo to load the process
     printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
     // si.core_id = my_core_id;
@@ -272,6 +275,8 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
     pro_node->processes->pid = *pid;
     pro_node->processes->state = PROC_STATE_SPAWNING;
     pro_node->processes->exit_code = 0;
+    pro_node->name = cmdline;
+
     
     printf("allocate new PID in spawn with cmdline%u\n", *pid);
     errval_t err = spawn_load_with_bootinfo(pro_node->si, bi, cmdline,*pid);
@@ -339,6 +344,8 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
     pro_node->processes->pid = *pid;
     pro_node->processes->state = PROC_STATE_SPAWNING;
     pro_node->processes->exit_code = 0;
+    pro_node->name = cmdline;
+
 
     errval_t err = spawn_load_with_bootinfo(pro_node->si, bi, cmdline, *pid);
     if (err_is_fail(err)) {
@@ -639,13 +646,28 @@ errval_t proc_mgmt_get_name(domainid_t pid, char *name, size_t len)
  */
 errval_t proc_mgmt_suspend(domainid_t pid)
 {
-    // make compiler happy about unused parameters
-    (void)pid;
+    struct process_node *current = proc_manager->head;
+    struct process_node *prev = NULL;
 
-    USER_PANIC("functionality not implemented\n");
-    // TODO:
-    //   - find the process with the given PID and suspend it
-    return LIB_ERR_NOT_IMPLEMENTED;
+    while (current != NULL) {
+        if (current->si->pid == pid) {
+            // Attempt to suspend the process
+            errval_t err = spawn_suspend(current->si);
+            if (err_is_fail(err)) {
+                USER_PANIC("Failed to SUSPEND process with PID %d: %s\n", pid, err_getstring(err));
+                return err;
+            }
+            
+            // Mark the process state as suspended
+            current->si->state = SPAWN_STATE_SUSPENDED;
+            printf("STATE OF CURRENT: %d\n", current->si->state);
+            return SYS_ERR_OK;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    return SPAWN_ERR_DOMAIN_NOTFOUND;  // If PID not found, return an appropriate error
 }
 
 
@@ -658,13 +680,28 @@ errval_t proc_mgmt_suspend(domainid_t pid)
  */
 errval_t proc_mgmt_resume(domainid_t pid)
 {
-    // make compiler happy about unused parameters
-    (void)pid;
+    struct process_node *current = proc_manager->head;
+    struct process_node *prev = NULL;
 
-    USER_PANIC("functionality not implemented\n");
-    // TODO:
-    //   - find the process with the given PID and resume its execution
-    return LIB_ERR_NOT_IMPLEMENTED;
+    while (current != NULL) {
+        if (current->si->pid == pid) {
+            // Attempt to suspend the process
+            errval_t err = spawn_resume(current->si);
+            if (err_is_fail(err)) {
+                USER_PANIC("Failed to SUSPEND process with PID %d: %s\n", pid, err_getstring(err));
+                return err;
+            }
+            
+            // Mark the process state as suspended
+            current->si->state = SPAWN_STATE_RUNNING;
+            printf("STATE OF CURRENT: %d\n", current->si->state);
+            return SYS_ERR_OK;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    return SPAWN_ERR_DOMAIN_NOTFOUND;  // If PID not found, return an appropriate error
 }
 
 
@@ -775,17 +812,51 @@ errval_t proc_mgmt_register_wait(domainid_t pid, enum aos_rpc_transport t, void 
  */
 errval_t proc_mgmt_kill(domainid_t pid)
 {
-    // make compiler happy about unused parameters
-    (void)pid;
+    struct process_node *current = proc_manager->head;
+    struct process_node *prev = NULL;
 
-    USER_PANIC("functionality not implemented\n");
+    while (current != NULL) {
+        if (current->si->pid == pid) {
+            // Attempt to kill the process
+            errval_t err = spawn_kill(current->si);
+            if (err_is_fail(err)) {
+                USER_PANIC("Failed to kill process with PID %d: %s\n", pid, err_getstring(err));
+                return err;
+            }
+            
+            // Mark the process state as killed
+            current->si->state = SPAWN_STATE_KILLED;
+            current->si->exitcode = -1;  // Standard exit code for killed process
+
+            // Remove the node from the linked list
+            if (prev == NULL) {
+                proc_manager->head = current->next;  // Head is being removed
+            } else {
+                prev->next = current->next;  // Bypass the current node
+            }
+            
+            // Free the node resources if necessary
+            free(current->si);  // Free spawn info if needed
+            free(current);      // Free the node itself
+            
+            // Decrease the count of processes
+            proc_manager->num_processes--;
+            
+            return SYS_ERR_OK;
+        }
+        prev = current;
+        current = current->next;
+    }
+
+    return SPAWN_ERR_DOMAIN_NOTFOUND;  // If PID not found, return an appropriate error
+}
     // TODO:
     //  - find the process in the process table and kill it
     //   - remove the process from the process table
     //   - clean up the state of the process
     //   - M4: notify its waiting processes
-    return LIB_ERR_NOT_IMPLEMENTED;
-}
+
+
 
 
 /**
@@ -803,14 +874,52 @@ errval_t proc_mgmt_kill(domainid_t pid)
  */
 errval_t proc_mgmt_killall(const char *name)
 {
-    // make compiler happy about unused parameters
-    (void)name;
+    struct process_node *current = proc_manager->head;
+    struct process_node *prev = NULL;
+    printf("PROC HEAD name: %s\n", current->si->binary_name);
+    bool found = false;
 
-    USER_PANIC("functionality not implemented\n");
+
+    while (current != NULL) {
+        if (strcmp(current->si->binary_name, name) == 0) {
+            found = true;
+            printf("input name: %s\n", name);
+            printf("Current iteration name: %s\n", current->si->binary_name);
+            // Attempt to kill the process
+            errval_t err = spawn_kill(current->si);
+            if (err_is_fail(err)) {
+                USER_PANIC("Failed to kill process with NAME %d: %s\n", name, err_getstring(err));
+                return err;
+            }
+            
+            // Mark the process state as killed
+            current->si->state = SPAWN_STATE_KILLED;
+            current->si->exitcode = -1;  // Standard exit code for killed process
+
+            // Remove the node from the linked list
+            if (prev == NULL) {
+                proc_manager->head = current->next;  // Head is being removed
+            } else {
+                prev->next = current->next;  // Bypass the current node
+            }
+            
+            // Free the node resources if necessary
+            free(current->si);  // Free spawn info if needed
+            free(current);      // Free the node itself
+            
+            // Decrease the count of processes
+            proc_manager->num_processes--;
+            
+        }
+        prev = current;
+        current = current->next;
+    }
+
+return found ? SYS_ERR_OK : SPAWN_ERR_DOMAIN_NOTFOUND;  // If no matching process was found, return an appropriate error
+}
     // TODO:
     //  - find all the processs that match the given name
     //  - remove the process from the process table
     //  - clean up the state of the process
     //  - M4: notify its waiting processes
-    return LIB_ERR_NOT_IMPLEMENTED;
-}
+

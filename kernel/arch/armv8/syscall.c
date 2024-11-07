@@ -902,6 +902,47 @@ static struct sysret handle_irq_table_alloc_dest_cap(struct capability* to,
     return SYSRET(irq_table_alloc_dest_cap(sa->arg1, sa->arg2, sa->arg3, sa->arg4));
 }
 
+
+static struct sysret handle_dispatcher_stop(struct capability *to, arch_registers_state_t *context, int argc) {
+    (void)context;
+    (void)argc;
+    printf("handle_dispatcher_stop called");
+
+    assert(to->type == ObjType_Dispatcher);
+
+    // Get the dispatcher structure from the capability
+    struct dcb *dispatcher = to->u.dispatcher.dcb;
+
+
+    if(dispatcher == NULL) {
+        printf("Couldn't find dispatcher");
+        return SYSRET(SYS_ERR_DISP_CAP_INVALID);
+    }
+    scheduler_remove(dispatcher);
+
+    return SYSRET(SYS_ERR_OK);
+}
+
+static struct sysret handle_dispatcher_resume(struct capability *to, arch_registers_state_t *context, int argc) {
+    (void)context;
+    (void)argc;
+    printf("handle_dispatcher_stop called");
+
+    assert(to->type == ObjType_Dispatcher);
+
+    // Get the dispatcher structure from the capability
+    struct dcb *dispatcher = to->u.dispatcher.dcb;
+    if(dispatcher == NULL) {
+        printf("Couldn't find dispatcher");
+        return SYSRET(SYS_ERR_DISP_CAP_INVALID);
+    }
+    scheduler_yield(dispatcher);
+
+    return SYSRET(SYS_ERR_OK);
+}
+
+
+
 static struct sysret dispatcher_dump_ptables(
     struct capability* to, arch_registers_state_t* context, int argc)
 {
@@ -1007,7 +1048,9 @@ static invocation_t invocations[ObjType_Num][CAP_MAX_CMD] = {
         [DispatcherCmd_Properties]  = handle_dispatcher_properties,
         [DispatcherCmd_PerfMon]     = handle_dispatcher_perfmon,
         [DispatcherCmd_DumpPTables]  = dispatcher_dump_ptables,
-        [DispatcherCmd_DumpCapabilities] = dispatcher_dump_capabilities
+        [DispatcherCmd_DumpCapabilities] = dispatcher_dump_capabilities,
+        [DispatcherCmd_Stop]    = handle_dispatcher_stop,
+        [DispatcherCmd_Resume]  = handle_dispatcher_resume,
     },
     [ObjType_KernelControlBlock] = {
         [KCBCmd_Identify] = handle_kcb_identify

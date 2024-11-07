@@ -177,6 +177,93 @@ static void spawn_one_with_caps(void)
     barrelfish_usleep(4000000);
 }
 
+static void test_suspend_and_resume(void)
+{
+    errval_t err;
+
+    // the core we want to spawn on, our own.
+    coreid_t core = disp_get_core_id();
+
+    grading_printf("spawn_one_without_args(%s)\n", BINARY_NAME);
+
+    domainid_t pid = 30;
+    err = proc_mgmt_spawn_with_cmdline(BINARY_NAME, core, &pid);
+    if (err_is_fail(err)) {
+        grading_test_fail("P1-1", "failed to load: %s\n", err_getstring(err));
+        return;
+    }
+    printf("hi\n");
+    grading_printf("SPAWN LIST BEFORE KILLING\n");
+    spawn_list();
+
+    err = proc_mgmt_suspend(pid);
+    if (err_is_fail(err)) {
+        grading_test_fail("P1-2", "failed to kill process: %s\n", err_getstring(err));
+        return;
+    }
+    printf("SPAWN LIST AFTER SUSPENDING\n");
+    spawn_list();
+
+    err = proc_mgmt_resume(pid);
+    if (err_is_fail(err)) {
+        grading_test_fail("P1-2", "failed to kill process: %s\n", err_getstring(err));
+        return;
+    }
+    printf("SPAWN LIST AFTER RESUMING\n");
+    spawn_list();
+
+
+    // Heads up! When you have messaging support, then you may need to handle a
+    // few messages here for the process to start up
+    grading_printf("waiting 2 seconds to give the other domain chance to run...\n");
+    barrelfish_usleep(2000000);
+}
+
+
+static void test_killing_process(void)
+{
+    errval_t err;
+
+    // the core we want to spawn on, our own.
+    coreid_t core = disp_get_core_id();
+
+    grading_printf("spawn_one_without_args(%s)\n", BINARY_NAME);
+
+    domainid_t pid = 70;
+    err = proc_mgmt_spawn_with_cmdline(BINARY_NAME, core, &pid);
+    if (err_is_fail(err)) {
+        grading_test_fail("P1-1", "failed to load: %s\n", err_getstring(err));
+        return;
+    }
+    printf("hi\n");
+    grading_printf("SPAWN LIST BEFORE KILLING\n");
+    spawn_list();
+
+    err = proc_mgmt_kill(pid);
+    if (err_is_fail(err)) {
+        grading_test_fail("P1-2", "failed to kill process: %s\n", err_getstring(err));
+        return;
+    }
+    printf("SPAWN LIST AFTER KILLING\n");
+    spawn_list();
+
+    err = proc_mgmt_killall(BINARY_NAME);
+    if (err_is_fail(err)) {
+        grading_test_fail("P1-2", "failed to kill process: %s\n", err_getstring(err));
+        return;
+    }
+    printf("SPAWN LIST AFTER KILLING ALL\n");
+    spawn_list();
+
+
+    // Heads up! When you have messaging support, then you may need to handle a
+    // few messages here for the process to start up
+    grading_printf("waiting 2 seconds to give the other domain chance to run...\n");
+    barrelfish_usleep(2000000);
+}
+
+
+
 
 errval_t grading_run_tests_processes(void)
 {
@@ -199,6 +286,10 @@ errval_t grading_run_tests_processes(void)
     spawn_one_with_args();
     spawn_list();
     spawn_one_with_caps();
+    test_suspend_and_resume();
+    test_killing_process();
+
+
 
     grading_printf("#################################################\n");
     grading_printf("# DONE:  Milestone 3 (Process Management)        \n");

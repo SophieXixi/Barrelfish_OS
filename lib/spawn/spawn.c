@@ -145,6 +145,8 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
         abort();
     }
     strcpy(si->binary_name, (char*) argv[0]);
+    printf("BINARY NAME: %s\n", si->binary_name);
+
 
     // Proceed with finding the .got section header
     struct Elf64_Shdr *got_section_header = elf64_find_section_header_name((genvaddr_t)si->mapped_elf, si->module->mrmod_size, ".got");
@@ -735,18 +737,24 @@ errval_t spawn_start(struct spawninfo *si)
 errval_t spawn_resume(struct spawninfo *si)
 {
     // make compiler happy about unused parameters
-    (void)si;
 
     // TODO:
     //  - check whether the process is in the right state
     //  - resume the execution of the process
     //  - set the state to running
     if (si->state != SPAWN_STATE_SUSPENDED) {
-        return SPAWN_ERR_WRONG_STATE;
+        return SPAWN_ERR_WRONG_STATE;  // The process is not in a state that can be suspended
     }
 
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Stop the execution of the process using its dispatcher capability
+    errval_t err = invoke_dispatcher_resume(si->dispatcher_child);
+    if(err_is_fail(err)) {
+        printf("Error resuming dispatcher");
+        return err;
+    }
+    // Update the state of the process to reflect that it has been killed
+
+    return SYS_ERR_OK;
 }
 
 /**
@@ -758,15 +766,20 @@ errval_t spawn_resume(struct spawninfo *si)
  */
 errval_t spawn_suspend(struct spawninfo *si)
 {
-    // make compiler happy about unused parameters
-    (void)si;
+    // Check if the process is in a state that allows it to be stopped
+    if (si->state != SPAWN_STATE_RUNNING) {
+        return SPAWN_ERR_WRONG_STATE;  // The process is not in a state that can be suspended
+    }
 
-    // TODO:
-    //  - check whether the process is in the right state
-    //  - stop the execution of the process
-    //  - set the state to suspended
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Stop the execution of the process using its dispatcher capability
+    errval_t err = invoke_dispatcher_stop(si->dispatcher_child);
+    if(err_is_fail(err)) {
+        printf("Error stopping dispatcher");
+        return err;
+    }
+    // Update the state of the process to reflect that it has been killed
+
+    return SYS_ERR_OK;
 }
 
 /**
@@ -778,15 +791,22 @@ errval_t spawn_suspend(struct spawninfo *si)
  */
 errval_t spawn_kill(struct spawninfo *si)
 {
-    // make compiler happy about unused parameters
-    (void)si;
 
-    // TODO:
-    //  - check whether the process is in the right state
-    //  - stop the execution of the process
-    //  - set the state to killed
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Check if the process is in a state that allows it to be stopped
+    if (si->state != SPAWN_STATE_RUNNING && si->state != SPAWN_STATE_SUSPENDED) {
+        return SPAWN_ERR_WRONG_STATE;  // The process is not in a state that can be killed
+    }
+
+    // Stop the execution of the process using its dispatcher capability
+    errval_t err = invoke_dispatcher_stop(si->dispatcher_child);
+    if(err_is_fail(err)) {
+        printf("Error stopping dispatcher");
+        return err;
+    }
+    // Update the state of the process to reflect that it has been killed
+    
+
+    return SYS_ERR_OK;
 }
 
 /**

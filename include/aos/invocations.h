@@ -388,6 +388,16 @@ static inline errval_t invoke_dispatcher_dump_ptables(struct capref dispcap, lva
     return cap_invoke2(dispcap, DispatcherCmd_DumpPTables, vaddr).error;
 }
 
+static inline errval_t invoke_dispatcher_stop(struct capref dispatcher_cap) {
+    return cap_invoke1(dispatcher_cap, DispatcherCmd_Stop).error;
+}
+
+static inline errval_t invoke_dispatcher_resume(struct capref dispatcher_cap) {
+    return cap_invoke1(dispatcher_cap, DispatcherCmd_Resume).error;
+}
+
+
+
 static inline errval_t invoke_dispatcher_dump_capabilities(struct capref dispcap)
 {
     return cap_invoke1(dispcap, DispatcherCmd_DumpCapabilities).error;
