@@ -302,6 +302,7 @@ static errval_t setup_child_cspace(struct spawninfo *si)
 
     for (size_t i = 0; i < ROOTCN_SLOTS_USER; ++i) {
         err = cnode_create_foreign_l2(l1_cap, i, &si->l2_cnodes[i]);
+
         if (err_is_fail(err)) {
             debug_printf("Error creating foreign L2 CNode: %s\n", err_getstring(err));
             return err;
@@ -723,6 +724,8 @@ errval_t spawn_start(struct spawninfo *si)
     }
     printf("INVOKED THE DISPATCHER\n");
     si->state = SPAWN_STATE_RUNNING;
+    printf("Process is running \n");
+
     // USER_PANIC("Not implemented");
     return SYS_ERR_OK;
 }

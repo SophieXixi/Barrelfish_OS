@@ -285,6 +285,9 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
         return err;
     }
     printf("Process loaded successfully for PID %u\n", *pid);
+    si.state = SPAWN_STATE_READY;
+
+    err = spawn_start(&si);
 
     pro_node->si->state = SPAWN_STATE_READY;
     err = spawn_start(pro_node->si);
