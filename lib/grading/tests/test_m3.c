@@ -223,7 +223,7 @@ static void test_suspend_and_resume(void)
 static void test_killing_process(void)
 {
     errval_t err;
-
+    
     // the core we want to spawn on, our own.
     coreid_t core = disp_get_core_id();
 
