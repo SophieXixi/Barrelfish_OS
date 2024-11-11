@@ -17,7 +17,7 @@
 
 
 
-
+genvaddr_t global_urpc_frames[4];
 
 
 
