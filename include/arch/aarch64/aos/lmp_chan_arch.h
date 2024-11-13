@@ -60,6 +60,7 @@ static inline errval_t lmp_ep_send(struct capref ep, lmp_send_flags_t flags, str
     uint8_t   send_level    = get_cap_level(send_cap);
     capaddr_t send_cptr     = get_cap_addr(send_cap);
     uint64_t  send_cap_info = ((uint64_t)send_level) << 32 | send_cptr;
+    printf("BEFORE SYSCALL\n");
 
     return syscall(si.raw, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, send_cap_info, 0, 0).error;
 }

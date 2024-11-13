@@ -286,14 +286,16 @@ errval_t grading_run_tests_processes(void)
     spawn_one_with_args();
     spawn_list();
     spawn_one_with_caps();
-    test_suspend_and_resume();
-    test_killing_process();
 
 
 
     grading_printf("#################################################\n");
     grading_printf("# DONE:  Milestone 3 (Process Management)        \n");
     grading_printf("#################################################\n");
+
+    test_suspend_and_resume();
+    test_killing_process();
+
 
     grading_stop();
 

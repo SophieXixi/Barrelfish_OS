@@ -40,7 +40,39 @@ typedef void (*aos_recv_handler_fn)(struct aos_rpc *ac);
  */
 
 struct aos_rpc {
-    // TODO(M3): Add state
+    struct lmp_chan *channel;          // LMP channel for communication
+    struct capref remote_cap;         // Capability to the remote endpoint
+    struct waitset *ws;               // Waitset for non-blocking communication
+    bool waiting_for_reply;           // Flag to indicate waiting for a reply
+};
+
+struct aos_rpc_num_payload {
+    struct aos_rpc *rpc;
+    uintptr_t val;
+};
+
+void setup_receive_handler(struct aos_rpc *rpc);
+void receive_number_handler(void *arg);
+
+enum msg_type {
+    ACK_MSG,
+    SETUP_MSG,
+    NUM_MSG,
+    STRING_MSG,
+    NAME_MSG,
+    PUTCHAR,
+    GETCHAR,
+    GETCHAR_ACK,
+    GET_RAM_CAP,
+    SPAWN_CMDLINE,
+    PID_ACK,
+    RAM_CAP_ACK,
+    GET_ALL_PIDS,
+    GET_MOD_NAMES,
+    GET_PID,
+    EXIT_MSG,
+    WAIT_MSG,
+    SPAWN_WITH_CAPS_MSG,
 };
 
 /**
