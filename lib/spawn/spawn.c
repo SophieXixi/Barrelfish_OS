@@ -340,26 +340,6 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     };
     err = cap_copy(si->taskcn_root, l1_cap);
 
-
-
-    // Step 7: Allocate ARGSPAGE and copy to child
-    // struct capref argspage;
-    // err = frame_alloc(&argspage, BASE_PAGE_SIZE, NULL);
-    // if (err_is_fail(err)) {
-    //     debug_printf("Failed to allocate ARGSPAGE: %s\n", err_getstring(err));
-    //     return err;
-    // }
-    // si->argspage_cap = (struct capref){
-    //     .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-    //     .slot = TASKCN_SLOT_ARGSPAGE
-    // };
-    // err = cap_copy(si->argspage_cap, argspage);
-    // if (err_is_fail(err)) {
-    //     debug_printf("Failed to copy ARGSPAGE to child: %s\n", err_getstring(err));
-    //     return err;
-    // }
-
-
     struct capref earlymem_cap;
 
     err = ram_alloc(&earlymem_cap, BASE_PAGE_SIZE * 1024);

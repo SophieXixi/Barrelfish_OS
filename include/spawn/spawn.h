@@ -41,7 +41,7 @@ typedef enum spawnstate {
     SPAWN_STATE_CLEANUP,      ///< process is being cleaned up
 } spawn_state_t;
 
-
+//Holds all the metadata about the new process
 struct spawninfo {
     /// name of the binary this process runs
     char *binary_name;
