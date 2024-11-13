@@ -19,6 +19,7 @@
 
 genvaddr_t global_urpc_frames[4];
 
+struct aos_rpc *global_rpc;
 
 
 /*
@@ -39,12 +40,30 @@ genvaddr_t global_urpc_frames[4];
  */
 errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
 {
-    // make compiler happy about unused parameters
-    (void)rpc;
-    (void)num;
+    struct lmp_chan *lc = rpc->channel;
+    errval_t err;
 
-    // TODO: implement functionality to send a number over the channel
-    // given channel and wait until the ack gets returned.
+    // Create a buffer for the message
+    err = lmp_chan_send1(lc, LMP_SEND_FLAGS_DEFAULT, NULL_CAP, num);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to send number: %s\n", err_getstring(err));
+        return err;
+    }
+
+    debug_printf("Number %lu sent successfully over RPC channel.\n", num);
+
+    // Wait for acknowledgment
+    rpc->waiting_for_reply = true;
+    while (rpc->waiting_for_reply) {
+        err = event_dispatch(rpc->ws);
+        if (err_is_fail(err)) {
+            debug_printf("Error in event dispatch while waiting for reply: %s\n", err_getstring(err));
+            return err;
+        }
+    }
+
+    debug_printf("Acknowledgment received for number %lu.\n", num);
+
     return SYS_ERR_OK;
 }
 
@@ -472,6 +491,67 @@ errval_t aos_rpc_proc_kill_all(struct aos_rpc *chan, const char *name)
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
+errval_t aos_rpc_init(struct aos_rpc *rpc) {
+    errval_t err;
+
+    // Initialize the LMP channel within the RPC structure
+    rpc->channel = malloc(sizeof(struct lmp_chan));
+
+    lmp_chan_init(rpc->channel);
+    debug_printf("Initialized LMP channel\n");
+
+    // Step 1: Set up the local endpoint for receiving messages
+    struct capref local_ep;
+    err = slot_alloc(&local_ep);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+
+    // Retype the dispatcher capability to an endpoint and mint it
+    struct capref dispatcher_cap = cap_dispatcher;  // The parent’s dispatcher capability
+    err = cap_retype(local_ep, dispatcher_cap, 0, ObjType_EndPointLMP, LMP_RECV_LENGTH);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CAP_RETYPE);
+    }
+
+    // Mint the endpoint with a buffer for message storage
+    struct capref final_ep;
+    err = slot_alloc(&final_ep);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_SLOT_ALLOC);
+    }
+
+    err = cap_mint(final_ep, local_ep, LMP_RECV_LENGTH, LMP_RECV_LENGTH);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CAP_MINT);
+    }
+
+    // Assign the local endpoint to the LMP channel's `local_cap` for receiving messages
+    rpc->channel->local_cap = final_ep;
+
+    // Step 2: Set up the channel for accepting messages
+    err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, rpc->channel->local_cap);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_CHAN_ACCEPT);
+    }
+
+    // Step 3: Set the remote endpoint for sending messages
+    // After spawning the child, the child’s endpoint should be copied to a known slot
+    struct capref remote_ep = {
+        .cnode = cnode_task,  // Adjust to parent’s view of child endpoint slot
+        .slot = TASKCN_SLOT_SELFEP
+    };
+    rpc->channel->remote_cap = remote_ep;
+    printf("Remote endpoint capability set:\n");
+    printf("  cnode.croot = %u, cnode.cnode = %u, cnode.level = %u\n", 
+           remote_ep.cnode.croot, remote_ep.cnode.cnode, remote_ep.cnode.level);
+    printf("  slot = %u\n", remote_ep.slot);
+
+
+    debug_printf("aos_rpc_init completed: local and remote endpoints set up\n");
+    return SYS_ERR_OK;
+}
+
 
 
 /**
@@ -479,11 +559,28 @@ errval_t aos_rpc_proc_kill_all(struct aos_rpc *chan, const char *name)
  */
 struct aos_rpc *aos_rpc_get_init_channel(void)
 {
-    // TODO: Return channel to talk to init process
-    debug_printf("aos_rpc_get_init_channel NYI\n");
-    return NULL;
-}
+    errval_t        err;
+    struct aos_rpc *rpc = global_rpc;
+    // debug_printf("entered init channel\n");
 
+    if (global_rpc == NULL) {
+        // debug_printf("creating new aos_rpc channel\n");
+        rpc = malloc(sizeof(struct aos_rpc));
+        printf("malloced rpc\n");
+        if (rpc == NULL) {
+            // debug_printf("aos_rpc_get_init_channel: malloc failed\n");
+            return NULL;
+        }
+        aos_rpc_init(rpc);
+
+        err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
+        printf("accepted lmp\n");
+
+    }
+
+    global_rpc = rpc;
+    return rpc;
+}
 /**
  * \brief Returns the channel to the memory server
  */
@@ -515,4 +612,33 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
     // implements print/read functionality)
     debug_printf("aos_rpc_get_serial_channel NYI\n");
     return NULL;
+}
+
+
+
+
+
+// Receive handler for a number
+void receive_number_handler(void *arg)
+{
+errval_t err;
+    struct aos_rpc_num_payload *payload = (struct aos_rpc_num_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct lmp_chan *lc = rpc->channel;
+    uintptr_t num = payload->val;
+
+
+    err = lmp_chan_send2(lc, 0, NULL_CAP, NUM_MSG, num);
+    while (lmp_err_is_transient(err)) {
+        err = lmp_chan_send2(lc, 0, NULL_CAP, NUM_MSG, num);
+    }
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "sending num in handler\n");
+        abort();
+    }}
+
+// Register the receive handler
+void setup_receive_handler(struct aos_rpc *rpc)
+{
+    lmp_chan_register_recv(rpc->channel, rpc->ws, MKCLOSURE(receive_number_handler, rpc));
 }

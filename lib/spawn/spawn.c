@@ -558,6 +558,11 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
     si->selfep_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
     si->selfep_cap.slot = TASKCN_SLOT_SELFEP;
     cap_copy(si->selfep_cap, selfep);
+    printf("Remote endpoint capability set SPAWN:\n");
+    printf("  cnode.croot = %u, cnode.cnode = %u, cnode.level = %u\n", 
+           si->selfep_cap.cnode.croot, si->selfep_cap.cnode.cnode, si->selfep_cap.cnode.level);
+    printf("  slot = %u\n", si->selfep_cap.slot);
+
 
     // Allocate dispatcher frame for parent
     struct capref dispframe_parent;
