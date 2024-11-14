@@ -25,6 +25,8 @@
 #include <aos/paging.h>
 #include <aos/systime.h>
 #include <barrelfish_kpi/domain_params.h>
+#include <aos/aos_rpc.h>
+
 
 #include "threads_priv.h"
 #include "init.h"
@@ -103,6 +105,62 @@ void barrelfish_libc_glue_init(void)
 }
 
 
+void initialize_send_handler(void *arg)
+{
+    debug_printf("callback to invoke the send_handler\n");
+    struct aos_rpc *rpc = arg;
+    errval_t err;
+
+    err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
+
+    err = lmp_chan_send1(rpc->channel, 0, rpc->channel->local_cap, SETUP_MSG);
+    if (err_is_fail(err)) {
+
+        // Failed here
+        DEBUG_ERR(err, "sending setup message");
+        abort();
+    }
+
+}
+
+/**
+ * \brief Handler to process acknowledgment messages.
+ *
+ * This function is triggered when an acknowledgment message is received
+ * from the `init` domain. It processes the message and performs necessary
+ * actions based on the message content.
+ *
+ * \param arg Pointer to the argument passed, typically containing the RPC
+ *            structure for communication.
+ */
+void init_acknowledgment_handler(void *arg)
+{
+    debug_printf("callback to invoke the init_acknowledgment_handler\n");
+    struct aos_rpc *rpc = (struct aos_rpc *)arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+    errval_t err;
+
+    // Attempt to receive the message from the channel
+    err = lmp_chan_recv(rpc->channel, &msg, &cap);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to receive acknowledgment message");
+        return;
+    }
+
+     err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
+
+    // Verify if the received message is an acknowledgment message
+    if (msg.words[0] == PID_ACK) {
+        //allocate a new receive slot 
+        err = lmp_chan_alloc_recv_slot(rpc->channel);
+        debug_printf("Acknowledgment received from init domain.\n");
+    } else {
+        debug_printf("Unexpected message type received in acknowledgment handler.\n");
+    }
+}
+
+
 /** \brief Initialise libbarrelfish.
  *
  * This runs on a thread in every domain, after the dispatcher is setup but
@@ -148,20 +206,45 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     lmp_endpoint_init();
 
     // HINT: Use init_domain to check if we are the init domain.
+    if (init_domain) {
+        err = cap_retype(cap_selfep,cap_dispatcher,0,ObjType_EndPointLMP,0);
+        debug_printf("This is the init domain\n");
+    }
 
     // TODO MILESTONE 4: register ourselves with init
+
+    // Obtain a reference to the init RPC channel
+    struct aos_rpc *init_rpc = aos_rpc_get_init_channel();
+    struct lmp_chan *init_rpc_channel = init_rpc->channel;
+
     /* allocate lmp channel structure */
     /* create local endpoint */
+    struct capref local_ep_cap;
+    err = endpoint_create(64, &local_ep_cap, &init_rpc_channel->endpoint);
+    if (err_is_fail(err)) {
+        free(init_rpc_channel);
+        return err_push(err, LIB_ERR_ENDPOINT_CREATE);
+    }
     /* set remote endpoint to init's endpoint */
     /* set receive handler */
+    err = lmp_chan_alloc_recv_slot(init_rpc->channel);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
+    }
     /* send local ep to init */
+     err = lmp_chan_register_send(init_rpc->channel, get_default_waitset(), MKCLOSURE(initialize_send_handler, (void *) init_rpc));
     /* wait for init to acknowledge receiving the endpoint */
     /* initialize init RPC client with lmp channel */
-    /* set init RPC client in our program state */
+
 
     /* TODO MILESTONE 4: now we should have a channel with init set up and can
      * use it for the ram allocator */
 
+
+    /* set init RPC client in our program state */
+    set_init_rpc(init_rpc);
+
+    
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here
     return SYS_ERR_OK;

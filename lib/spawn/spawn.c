@@ -864,18 +864,26 @@ errval_t spawn_cleanup(struct spawninfo *si)
  */
 errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_handler_fn handler)
 {
-    // make compiler happy about unused parameters
-    (void)si;
-    (void)ws;
     (void)handler;
+    (void)ws;
 
-    // TODO:
-    //  - initialize the messaging channels for the process
-    //  - check its execution state (it shouldn't have run yet)
-    //  - create the required capabilities if needed
-    //  - set the receive handler
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    errval_t err;
+
+    // check the execution state of the process (it shouldn't have run yet)
+    if (si->state != SPAWN_STATE_READY) {
+        return SPAWN_ERR_LOAD;
+    }
+
+    // create the struct chan (TODO: if we ever need access to this struct on init side, good luck!)
+    struct aos_rpc *rpc = malloc(sizeof(struct aos_rpc));    
+    if (rpc == NULL) {
+        return SPAWN_ERR_LOAD;
+    }
+    err = aos_rpc_init(rpc);
+  
+    err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
+
+    return SYS_ERR_OK;
 }
 
 

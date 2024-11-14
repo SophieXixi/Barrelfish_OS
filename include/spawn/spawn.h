@@ -100,7 +100,7 @@ struct spawninfo {
     // list of children processes (if this process spawns children)
     struct spawninfo **children;
     size_t num_children;
-
+    struct capref child_selfep;
     
 
 };
