@@ -492,66 +492,14 @@ errval_t aos_rpc_proc_kill_all(struct aos_rpc *chan, const char *name)
 }
 
 errval_t aos_rpc_init(struct aos_rpc *rpc) {
-    errval_t err;
-
-    // Initialize the LMP channel within the RPC structure
     rpc->channel = malloc(sizeof(struct lmp_chan));
-
+    if (rpc->channel == NULL) {
+        return LIB_ERR_MALLOC_FAIL;
+    }
     lmp_chan_init(rpc->channel);
-    debug_printf("Initialized LMP channel\n");
 
-    // Step 1: Set up the local endpoint for receiving messages
-    struct capref local_ep;
-    err = slot_alloc(&local_ep);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-
-    // Retype the dispatcher capability to an endpoint and mint it
-    struct capref dispatcher_cap = cap_dispatcher;  // The parent’s dispatcher capability
-    err = cap_retype(local_ep, dispatcher_cap, 0, ObjType_EndPointLMP, LMP_RECV_LENGTH);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_CAP_RETYPE);
-    }
-
-    // Mint the endpoint with a buffer for message storage
-    struct capref final_ep;
-    err = slot_alloc(&final_ep);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_SLOT_ALLOC);
-    }
-
-    err = cap_mint(final_ep, local_ep, LMP_RECV_LENGTH, LMP_RECV_LENGTH);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_CAP_MINT);
-    }
-
-    // Assign the local endpoint to the LMP channel's `local_cap` for receiving messages
-    rpc->channel->local_cap = final_ep;
-
-    // Step 2: Set up the channel for accepting messages
-    err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, rpc->channel->local_cap);
-    if (err_is_fail(err)) {
-        return err_push(err, LIB_ERR_LMP_CHAN_ACCEPT);
-    }
-
-    // Step 3: Set the remote endpoint for sending messages
-    // After spawning the child, the child’s endpoint should be copied to a known slot
-    struct capref remote_ep = {
-        .cnode = cnode_task,  // Adjust to parent’s view of child endpoint slot
-        .slot = TASKCN_SLOT_SELFEP
-    };
-    rpc->channel->remote_cap = remote_ep;
-    printf("Remote endpoint capability set:\n");
-    printf("  cnode.croot = %u, cnode.cnode = %u, cnode.level = %u\n", 
-           remote_ep.cnode.croot, remote_ep.cnode.cnode, remote_ep.cnode.level);
-    printf("  slot = %u\n", remote_ep.slot);
-
-
-    debug_printf("aos_rpc_init completed: local and remote endpoints set up\n");
     return SYS_ERR_OK;
 }
-
 
 
 /**
@@ -559,7 +507,7 @@ errval_t aos_rpc_init(struct aos_rpc *rpc) {
  */
 struct aos_rpc *aos_rpc_get_init_channel(void)
 {
-    errval_t        err;
+    //errval_t        err;
     struct aos_rpc *rpc = global_rpc;
     // debug_printf("entered init channel\n");
 
@@ -573,7 +521,7 @@ struct aos_rpc *aos_rpc_get_init_channel(void)
         }
         aos_rpc_init(rpc);
 
-        err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
+        //err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
         printf("accepted lmp\n");
 
     }

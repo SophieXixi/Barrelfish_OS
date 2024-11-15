@@ -164,14 +164,27 @@ static errval_t lmp_transfer_cap(struct capability *ep, struct dcb *send,
     struct capability *recv_cspace_cap;
     // XXX: do we want a level into receiver's cspace here?
     // printk(LOG_NOTE, "recv_cspace_ptr = %"PRIxCADDR"\n", recv_ep->recv_cspc);
+
+    printf("Debug: lmp_transfer_cap - Checking receiver's endpoint and CSpace\n");
+
+// Print endpoint offset to ensure it’s non-zero and correct
+printf(" - ep->u.endpointlmp.epoffset: %lu\n", ep->u.endpointlmp.epoffset);
+
+// Debugging recv_ep
+printf(" - recv_ep->recv_cspc: %" PRIxCADDR "\n", recv_ep->recv_cspc);
+
+
     err = caps_lookup_cap(&recv->cspace.cap, recv_ep->recv_cspc, 2,
                           &recv_cspace_cap, CAPRIGHTS_READ_WRITE);
     if (err_is_fail(err) || recv_cspace_cap->type != ObjType_L1CNode) {
+        printf("SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID 1\n");
         return SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID;
     }
     // Check index into L1 cnode
     capaddr_t l1index = recv_ep->recv_cptr >> L2_CNODE_BITS;
     if (l1index >= cnode_get_slots(recv_cspace_cap)) {
+                printf("SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID 2\n");
+
         return SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID;
     }
     // Get the cnode
@@ -180,6 +193,8 @@ static errval_t lmp_transfer_cap(struct capability *ep, struct dcb *send,
     struct capability *recv_cnode_cap = &recv_cnode_cte->cap;
     // Check for cnode type
     if (recv_cnode_cap->type != ObjType_L2CNode) {
+                printf("SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID 3\n");
+
         return SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID;
     }
     // The slot within the cnode
@@ -235,6 +250,7 @@ errval_t lmp_can_deliver_payload(struct capability *ep,
     assert(recv != NULL);
 
     /* check that receiver exists and has specified an endpoint buffer */
+    printf("Before checking for target dispatcher\n");
     if (recv->disp == 0 || ep->u.endpointlmp.epoffset == 0) {
         return SYS_ERR_LMP_NO_TARGET;
     }
@@ -380,6 +396,13 @@ errval_t lmp_deliver(struct capability *ep, struct dcb *send,
         if (err_is_fail(err)) {
             return err;
         }
+                printf("Debug: lmp_transfer_cap inputs:\n");
+        printf(" - Endpoint cap type: %d\n", ep->type);
+        printf(" - Sender DCB pointer: %p\n", (void*)send);
+        printf(" - send_cptr (capaddr): %u\n", send_cptr);
+        printf(" - send_level (cap level): %u\n", send_level);
+        printf(" - give_away (bool): %d\n", give_away);
+
 
         err = lmp_transfer_cap(ep, send, send_cptr, send_level, give_away);
         if (err_is_fail(err)) {

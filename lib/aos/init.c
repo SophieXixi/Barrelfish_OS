@@ -200,39 +200,88 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_MORECORE_INIT);
     }
+    struct aos_rpc *init_rpc = aos_rpc_get_init_channel();
 
-
-
+// TODO MILESTONE 4: register ourselves with init
     lmp_endpoint_init();
 
-    // HINT: Use init_domain to check if we are the init domain.
-    if (init_domain) {
-        err = cap_retype(cap_selfep,cap_dispatcher,0,ObjType_EndPointLMP,0);
-        debug_printf("This is the init domain\n");
+    /* allocate lmp channel structure */
+    struct lmp_chan *chan = malloc(sizeof(struct lmp_chan));
+
+    /* create local endpoint */
+
+    err = cap_retype(cap_selfep, cap_dispatcher, 0,ObjType_EndPointLMP,0);
+    if(err_is_fail(err)) {
+        printf("error retyping local ep\n");
+        return err_push(err, LIB_ERR_CAP_RETYPE);
     }
 
-    // TODO MILESTONE 4: register ourselves with init
-
-    // Obtain a reference to the init RPC channel
-    struct aos_rpc *init_rpc = aos_rpc_get_init_channel();
-    struct lmp_chan *init_rpc_channel = init_rpc->channel;
-
-    /* allocate lmp channel structure */
-    /* create local endpoint */
     struct capref local_ep_cap;
-    err = endpoint_create(64, &local_ep_cap, &init_rpc_channel->endpoint);
+    slot_alloc(&local_ep_cap);
+    err = cap_retype(local_ep_cap, cap_dispatcher, 0, ObjType_EndPointLMP, 1);
     if (err_is_fail(err)) {
-        free(init_rpc_channel);
+        printf("error retyping local ep\n");
+        return err_push(err, LIB_ERR_CAP_RETYPE);
+    }
+
+    err = endpoint_create(64, &local_ep_cap, &chan->endpoint);
+    if (err_is_fail(err)) {
+        printf("error creating local endpoint\n");
         return err_push(err, LIB_ERR_ENDPOINT_CREATE);
     }
+
     /* set remote endpoint to init's endpoint */
+    err = lmp_chan_accept(chan, DEFAULT_LMP_BUF_WORDS, local_ep_cap);
+    if (err_is_fail(err)) {
+        printf("error accepting lmp channel\n");
+        return err_push(err, LIB_ERR_LMP_CHAN_ACCEPT);
+    }
+
     /* set receive handler */
-    err = lmp_chan_alloc_recv_slot(init_rpc->channel);
+    err = lmp_chan_alloc_recv_slot(chan);
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
     }
+
+    err = lmp_chan_register_recv(chan, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, (void *) init_rpc));
+    if(err_is_fail(err)) {
+        printf("error registering receive handler\n");
+        return err_push(err, LIB_ERR_BIND_LMP_REPLY);
+    }
+
     /* send local ep to init */
-     err = lmp_chan_register_send(init_rpc->channel, get_default_waitset(), MKCLOSURE(initialize_send_handler, (void *) init_rpc));
+    err = lmp_chan_send0(chan, 0, local_ep_cap);
+    if (err_is_fail(err)) {
+        printf("error sending local cap\n");
+        return err_push(err, LIB_ERR_LMP_CHAN_SEND);
+    }
+
+    /* wait for init to acknowledge receiving the endpoint */
+    /* initialize init RPC client with lmp channel */
+    /* set init RPC client in our program state */
+
+    
+    // TODO MILESTONE 4: register ourselves with init
+
+    // Obtain a reference to the init RPC channel
+
+    /* set remote endpoint to init's endpoint */
+    /* set receive handler */
+    if (err_is_fail(err)) {
+        printf("error registering receive handler\n");
+        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
+    }
+
+    /* send local ep to init */
+    err = lmp_chan_send1(init_rpc->channel, 0, local_ep_cap, SETUP_MSG);
+    if (err_is_fail(err)) {
+                printf("error sending local cap\n");
+
+        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
+    }
+
+    //err = lmp_chan_register_send(init_rpc->channel, get_default_waitset(), MKCLOSURE(initialize_send_handler, (void *) init_rpc));
+
     /* wait for init to acknowledge receiving the endpoint */
     /* initialize init RPC client with lmp channel */
 
@@ -242,13 +291,35 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
 
 
     /* set init RPC client in our program state */
-    set_init_rpc(init_rpc);
+    // set_init_rpc(init_rpc);
 
-    
+    //     struct capref dispatcher_parent;
+    // err = slot_alloc(&dispatcher_parent);
+    // if (err_is_fail(err)) {
+    //     printf("Failed to allocate slot for dispatcher\n");
+    //     return err;
+    // }
+    // printf("Slot allocated for dispatcher\n");
+
+    // // Create dispatcher
+    // err = dispatcher_create(dispatcher_parent);
+    // if (err_is_fail(err)) {
+    //     printf("Failed to create dispatcher\n");
+    //     return SPAWN_ERR_DISPATCHER_SETUP;
+    // }
+
+
+    // // HINT: Use init_domain to check if we are the init domain.
+    // if (init_domain) {
+    //     err = cap_retype(cap_selfep,cap_dispatcher,0,ObjType_EndPointLMP,0);
+    //     debug_printf("This is the init domain\n");
+    // }
+
+
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here
     return SYS_ERR_OK;
-}
+    }
 
 
 /**
