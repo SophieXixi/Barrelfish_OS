@@ -539,6 +539,7 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
         return SPAWN_ERR_DISPATCHER_SETUP;
     }
 
+
     struct capref selfep;
     err = cap_retype(selfep, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
 
@@ -874,12 +875,16 @@ errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_hand
     errval_t err;
 
     // Check the execution state of the process
-    debug_printf("Checking the process state...\n");
-    if (si->state != SPAWN_STATE_READY) {
-        debug_printf("Process state is not READY. Current state: %d\n", si->state);
-        return SPAWN_ERR_LOAD;
-    }
-    debug_printf("Process state is READY.\n");
+    // debug_printf("Checking the process state...\n");
+    // if (si->state != SPAWN_STATE_READY) {
+    //     debug_printf("Process state is not READY. Current state: %d\n", si->state);
+    //     return SPAWN_ERR_LOAD;
+    // }
+    // debug_printf("Process state is READY.\n");
+
+    
+
+    
 
     // Create the struct aos_rpc
     debug_printf("Allocating memory for aos_rpc structure...\n");
@@ -900,9 +905,11 @@ errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_hand
     }
     debug_printf("Successfully initialized the RPC channel.\n");
 
+
+
     // Accept the LMP channel
     debug_printf("Attempting to accept the LMP channel...\n");
-    err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
+    err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
     if (err_is_fail(err)) {
         debug_printf("Failed to accept LMP channel: %s\n", err_getstring(err));
         free(rpc);  // Clean up allocated memory on failure
@@ -910,17 +917,27 @@ errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_hand
     }
     debug_printf("Successfully accepted the LMP channel.\n");
 
-    // Set up the child's init endpoint capability
+ // Set up the child's init endpoint capability
     struct capref child_init_endpoint = {
-        .cnode = si->child_selfep.cnode,
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
         .slot = TASKCN_SLOT_INITEP
     };
+   
 
     // Copy the local capability of the LMP channel into the child's init endpoint slot
     debug_printf("Copying local capability of LMP channel to child's init endpoint...\n");
     debug_printf("Source cap: cnode = %u, slot = %u\n", rpc->channel->local_cap.cnode.cnode, rpc->channel->local_cap.slot);
     debug_printf("Destination cap: cnode = %u, slot = %u\n", child_init_endpoint.cnode.cnode, child_init_endpoint.slot);
-    err = cap_copy(child_init_endpoint, rpc->channel->local_cap);
+    
+     debug_printf("reach here???\n");
+     debug_print_cap_at_capref(rpc->channel->local_cap);
+
+     err = cap_copy(child_init_endpoint, rpc->channel->local_cap);
+
+
+   //err = cap_copy(child_init_endpoint, local_ep);
+    printf("create and copy endpoint\n");
+
     if (err_is_fail(err)) {
         debug_printf("Failed to copy local capability: %s\n", err_getstring(err));
         free(rpc);  // Clean up allocated memory on failure
