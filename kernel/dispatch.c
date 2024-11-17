@@ -167,16 +167,17 @@ static errval_t lmp_transfer_cap(struct capability *ep, struct dcb *send,
 
     printf("Debug: lmp_transfer_cap - Checking receiver's endpoint and CSpace\n");
 
-// Print endpoint offset to ensure it’s non-zero and correct
-printf(" - ep->u.endpointlmp.epoffset: %lu\n", ep->u.endpointlmp.epoffset);
+    // Print endpoint offset to ensure it’s non-zero and correct
+    printf(" - ep->u.endpointlmp.epoffset: %lu\n", ep->u.endpointlmp.epoffset);
 
-// Debugging recv_ep
-printf(" - recv_ep->recv_cspc: %" PRIxCADDR "\n", recv_ep->recv_cspc);
+    // Debugging recv_ep
+    printf(" - recv_ep->recv_cspc: %" PRIxCADDR "\n", recv_ep->recv_cspc);
 
 
     err = caps_lookup_cap(&recv->cspace.cap, recv_ep->recv_cspc, 2,
                           &recv_cspace_cap, CAPRIGHTS_READ_WRITE);
     if (err_is_fail(err) || recv_cspace_cap->type != ObjType_L1CNode) {
+        // Failed here
         printf("SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID 1\n");
         return SYS_ERR_LMP_CAPTRANSFER_DST_CNODE_INVALID;
     }

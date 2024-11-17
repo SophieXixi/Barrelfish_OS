@@ -593,8 +593,6 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
             parent_src = frame;
         }
 
-
-
         result = vnode_map(parent_dest, 
                            parent_src, VMSAv8_64_L3_INDEX(vaddr), flags, offset + (BASE_PAGE_SIZE * (total_pages - remaining_pages)), 
                            pages_mapped, parent_mapping);
@@ -653,7 +651,6 @@ errval_t paging_map_fixed_attr_offset(struct paging_state *st, lvaddr_t vaddr, s
 void page_fault_handler(void *faulting_address)
 {
     errval_t err;
-    // printf("Page fault occurred at address: %p\n", (void*)faulting_address);
 
     struct paging_state *st = get_current_paging_state();
 
@@ -687,10 +684,10 @@ void page_fault_handler(void *faulting_address)
     }
 
     // // If the region is not lazily allocated, raise an error
-    // if (region->type != PAGING_REGION_LAZY) {
-    //     USER_PANIC("Page fault outside lazily allocated region: %p\n", faulting_address);
-    //     return;
-    // }
+    if (region->type != PAGING_REGION_LAZY) {
+        USER_PANIC("Page fault outside lazily allocated region: %p\n", faulting_address);
+        return;
+    }
 
     // Proceed with lazy allocation and mapping
     // printf("Allocating and mapping frame for lazily allocated region\n");

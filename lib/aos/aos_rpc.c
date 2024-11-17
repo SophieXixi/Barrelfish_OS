@@ -20,6 +20,8 @@
 genvaddr_t global_urpc_frames[4];
 
 struct aos_rpc *global_rpc;
+domainid_t global_pid;
+
 
 
 /*
@@ -27,6 +29,64 @@ struct aos_rpc *global_rpc;
  * Generic RPCs
  * ===============================================================================================
  */
+
+void initialize_send_handler(void *arg)
+{
+    debug_printf("callback to invoke the send_handler\n");
+    struct aos_rpc *rpc = arg;
+    errval_t err;
+
+    err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
+
+    err = lmp_chan_send1(rpc->channel, 0, rpc->channel->local_cap, SETUP_MSG);
+    if (err_is_fail(err)) {
+
+        // Failed here
+        DEBUG_ERR(err, "sending setup message");
+        abort();
+    }
+
+}
+
+
+/**
+ * \brief Handler to process acknowledgment messages.
+ *
+ * This function is triggered when an acknowledgment message is received
+ * from the `init` domain. It processes the message and performs necessary
+ * actions based on the message content.
+ *
+ * \param arg Pointer to the argument passed, typically containing the RPC
+ *            structure for communication.
+ */
+void init_acknowledgment_handler(void *arg)
+{
+    debug_printf("callback to invoke the init_acknowledgment_handler\n");
+    struct aos_rpc *rpc = (struct aos_rpc *)arg;
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct capref cap;
+    errval_t err;
+
+    // Attempt to receive the message from the channel
+    err = lmp_chan_recv(rpc->channel, &msg, &cap);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to receive acknowledgment message");
+        return;
+    }
+
+     err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
+
+    // Verify if the received message is an acknowledgment message
+    if (msg.words[0] == PID_ACK) {
+        //allocate a new receive slot 
+        err = lmp_chan_alloc_recv_slot(rpc->channel);
+        global_pid = msg.words[1];
+        debug_printf("Acknowledgment received from init domain.\n");
+    } else {
+        debug_printf("Unexpected message type received in acknowledgment handler.\n");
+    }
+}
+
 
 /**
  * @brief Send a single number over an RPC channel.
@@ -216,7 +276,26 @@ errval_t aos_rpc_proc_spawn_with_caps(struct aos_rpc *chan, int argc, const char
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
+static void send_cmdline_handler(void* arg) {
+    // debug_printf("got into send cmdline handler\n");
+    
+    errval_t err;
 
+    // unpack the provided string and length
+    struct aos_rpc_cmdline_payload *payload = (struct aos_rpc_cmdline_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct capref frame = payload->frame;
+    size_t len = payload->len;
+    struct lmp_chan *lc = rpc->channel;
+
+    err = lmp_chan_send3(lc, 0, frame, SPAWN_CMDLINE, len, payload->core);
+    while (err_is_fail(err)) {
+        DEBUG_ERR(err, "sending cmdline in handler\n");
+        abort();
+    }
+
+    // debug_printf("cmdline sent!\n");
+}
 
 /**
  * @brief requests a new process to be spawned with the supplied commandline
@@ -237,9 +316,59 @@ errval_t aos_rpc_proc_spawn_with_cmdline(struct aos_rpc *chan, const char *cmdli
     (void)core;
     (void)newpid;
 
-    // TODO: implement the process spawn with cmdline RPC
-    DEBUG_ERR(LIB_ERR_NOT_IMPLEMENTED, "%s not implemented", __FUNCTION__);
-    return LIB_ERR_NOT_IMPLEMENTED;
+    errval_t err;
+
+    // debug_printf("entered api for spawn cmdline\n");
+    // debug_printf("here's the cmdline: %s\n", cmdline);
+    struct lmp_chan *lc = chan->channel;
+
+    // allocate and map a frame, copying to it the string contents
+    struct capref frame;
+    void *buf;
+    int len = strlen(cmdline);
+  
+
+    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+    if (err_is_fail(err)) {
+        debug_printf("could not allocate frame\n");
+    }    
+
+    err = paging_map_frame_attr(get_current_paging_state(), &buf, BASE_PAGE_SIZE, frame, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        debug_printf("could not map frame\n");
+    }    
+
+
+    strcpy(buf, cmdline);
+
+    // pass the string frame and length in the payload
+    struct aos_rpc_cmdline_payload *payload = malloc(sizeof(struct aos_rpc_cmdline_payload));
+    payload->rpc = chan;
+    payload->frame = frame;
+    payload->len = len;
+    payload->core = core;
+    // debug_printf("here is the initial value of pid: %d\n", global_pid);
+
+    // send the frame and the length on the channel
+    err = lmp_chan_alloc_recv_slot(lc);
+    if (err_is_fail(err)) {
+        debug_printf("could not lmp_chan_alloc_recv_slot\n");
+    }
+
+
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_cmdline_handler, (void *)payload));
+    if (err_is_fail(err)) {
+        debug_printf("could not lmp_chan_register_send\n");
+    }
+
+    event_dispatch(get_default_waitset());
+    event_dispatch(get_default_waitset());
+  
+    *newpid = global_pid;
+
+    free(payload);
+    
+    return SYS_ERR_OK;
 }
 
 
@@ -492,12 +621,22 @@ errval_t aos_rpc_proc_kill_all(struct aos_rpc *chan, const char *name)
 }
 
 errval_t aos_rpc_init(struct aos_rpc *rpc) {
+    debug_printf("Entering aos_rpc_init function\n");
+
+    // Allocate memory for the LMP channel
     rpc->channel = malloc(sizeof(struct lmp_chan));
     if (rpc->channel == NULL) {
+        debug_printf("Failed to allocate memory for LMP channel\n");
         return LIB_ERR_MALLOC_FAIL;
     }
-    lmp_chan_init(rpc->channel);
+    debug_printf("Successfully allocated memory for LMP channel\n");
 
+    // Initialize the LMP channel
+    debug_printf("Initializing the LMP channel\n");
+    lmp_chan_init(rpc->channel);
+    debug_printf("LMP channel initialized successfully\n");
+
+    debug_printf("Exiting aos_rpc_init function\n");
     return SYS_ERR_OK;
 }
 
@@ -507,28 +646,23 @@ errval_t aos_rpc_init(struct aos_rpc *rpc) {
  */
 struct aos_rpc *aos_rpc_get_init_channel(void)
 {
-    //errval_t        err;
+    errval_t err;
     struct aos_rpc *rpc = global_rpc;
-    // debug_printf("entered init channel\n");
 
     if (global_rpc == NULL) {
-        // debug_printf("creating new aos_rpc channel\n");
         rpc = malloc(sizeof(struct aos_rpc));
         printf("malloced rpc\n");
         if (rpc == NULL) {
-            // debug_printf("aos_rpc_get_init_channel: malloc failed\n");
             return NULL;
         }
         aos_rpc_init(rpc);
-
-        //err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
-        printf("accepted lmp\n");
-
+        err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
     }
 
     global_rpc = rpc;
     return rpc;
 }
+
 /**
  * \brief Returns the channel to the memory server
  */

@@ -51,6 +51,14 @@ struct aos_rpc_num_payload {
     uintptr_t val;
 };
 
+struct aos_rpc_cmdline_payload {
+    struct aos_rpc   *rpc;
+    struct capref     frame;
+           size_t     len;
+           coreid_t   core;
+           domainid_t pid;
+};
+
 void setup_receive_handler(struct aos_rpc *rpc);
 void receive_number_handler(void *arg);
 
@@ -85,8 +93,11 @@ enum msg_type {
 errval_t aos_rpc_init(struct aos_rpc *rpc);
 
 
+void initialize_send_handler(void *arg);
+void init_acknowledgment_handler(void *arg);
 
-
+// global receive handler
+void gen_recv_handler(void *arg);
 
 
 /*
