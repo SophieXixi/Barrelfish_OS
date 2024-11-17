@@ -21,8 +21,9 @@ genvaddr_t global_urpc_frames[4];
 
 struct aos_rpc *global_rpc;
 domainid_t global_pid;
-
-
+struct capref global_retcap;
+size_t global_retbytes;
+char global_retchar;
 
 /*
  * ===============================================================================================
@@ -30,7 +31,9 @@ domainid_t global_pid;
  * ===============================================================================================
  */
 
-void initialize_send_handler(void *arg)
+void 
+
+initialize_send_handler(void *arg)
 {
     debug_printf("callback to invoke the send_handler\n");
     struct aos_rpc *rpc = arg;
@@ -38,7 +41,19 @@ void initialize_send_handler(void *arg)
 
     err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
 
-    err = lmp_chan_send1(rpc->channel, 0, rpc->channel->local_cap, SETUP_MSG);
+
+    debug_printf("Checking local_cap: cnode = %u, slot = %u\n",
+             rpc->channel->local_cap.cnode.cnode, rpc->channel->local_cap.slot);
+
+    struct capability cap_info;
+    err = invoke_cap_identify(rpc->channel->local_cap, &cap_info);
+    if (err_is_fail(err)) {
+        debug_printf("Invalid local_cap: %s\n", err_getstring(err));
+    } else {
+        debug_printf("local_cap is valid. Capability type: %u\n", cap_info.type);
+    }
+
+    err = lmp_chan_send1(rpc->channel, 0, NULL_CAP, SETUP_MSG);
     if (err_is_fail(err)) {
 
         // Failed here
@@ -64,11 +79,11 @@ void init_acknowledgment_handler(void *arg)
     debug_printf("callback to invoke the init_acknowledgment_handler\n");
     struct aos_rpc *rpc = (struct aos_rpc *)arg;
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
-    struct capref cap;
+    struct capref retcap;
     errval_t err;
 
     // Attempt to receive the message from the channel
-    err = lmp_chan_recv(rpc->channel, &msg, &cap);
+    err = lmp_chan_recv(rpc->channel, &msg, &retcap);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "Failed to receive acknowledgment message");
         return;
@@ -82,11 +97,52 @@ void init_acknowledgment_handler(void *arg)
         err = lmp_chan_alloc_recv_slot(rpc->channel);
         global_pid = msg.words[1];
         debug_printf("Acknowledgment received from init domain.\n");
-    } else {
-        debug_printf("Unexpected message type received in acknowledgment handler.\n");
+        return;
+    } else if (msg.words[0] == RAM_CAP_ACK) {
+        err = lmp_chan_alloc_recv_slot(rpc->channel);
+        // debug_printf("received ram cap size: %d\n", msg.words[1]);
+        global_retcap = retcap;
+        global_retbytes = msg.words[1];
+        return;
+    } else if (msg.words[0] == GETCHAR_ACK) {
+        err = lmp_chan_alloc_recv_slot(rpc->channel);
+        // debug_printf("received char: %c\n", msg.words[1]);
+        global_retchar = msg.words[1];
+        return;
     }
+    // debug_printf("received ack\n");
+        
+   // debug_printf("heres the address of rpc->waiting_on_ack from the ack pov: %p\n", &(rpc->waiting_on_ack));
+    while (err_is_fail(err)) {
+        // debug_printf("\n\n\n\nthis actually ran (ack recv handler)\n\n\n\n\n");
+    }
+
+    err = lmp_chan_alloc_recv_slot(rpc->channel);
 }
 
+
+static void send_num_handler(void *arg)
+{
+    // debug_printf("got into send num handler\n");
+    
+    errval_t err;
+    struct aos_rpc_num_payload *payload = (struct aos_rpc_num_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct lmp_chan *lc = rpc->channel;
+    uintptr_t num = payload->val;
+
+
+    err = lmp_chan_send2(lc, 0, NULL_CAP, NUM_MSG, num);
+    while (lmp_err_is_transient(err)) {
+        err = lmp_chan_send2(lc, 0, NULL_CAP, NUM_MSG, num);
+    }
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "sending num in handler\n");
+        abort();
+    }
+
+    // debug_printf("number sent!\n");
+}
 
 /**
  * @brief Send a single number over an RPC channel.
@@ -100,29 +156,21 @@ void init_acknowledgment_handler(void *arg)
  */
 errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
 {
-    struct lmp_chan *lc = rpc->channel;
+   struct lmp_chan *lc = rpc->channel;
     errval_t err;
 
-    // Create a buffer for the message
-    err = lmp_chan_send1(lc, LMP_SEND_FLAGS_DEFAULT, NULL_CAP, num);
-    if (err_is_fail(err)) {
-        debug_printf("Failed to send number: %s\n", err_getstring(err));
-        return err;
-    }
-
-    debug_printf("Number %lu sent successfully over RPC channel.\n", num);
-
-    // Wait for acknowledgment
-    rpc->waiting_for_reply = true;
-    while (rpc->waiting_for_reply) {
-        err = event_dispatch(rpc->ws);
-        if (err_is_fail(err)) {
-            debug_printf("Error in event dispatch while waiting for reply: %s\n", err_getstring(err));
-            return err;
-        }
-    }
-
-    debug_printf("Acknowledgment received for number %lu.\n", num);
+    // marshall args into num payload
+    struct aos_rpc_num_payload *payload = malloc(sizeof(struct aos_rpc_num_payload));
+    payload->rpc = rpc;
+    payload->val = num;
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_num_handler, (void *) payload));
+    
+    
+    // debug_printf("made it to the end of number sending\n");
+    event_dispatch(get_default_waitset());
+    event_dispatch(get_default_waitset());
+    
+    free(payload);
 
     return SYS_ERR_OK;
 }
@@ -157,6 +205,24 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
  */
 
 
+static void send_ram_cap_req_handler(void* arg) {
+    // debug_printf("got into send ram cap req handler\n");
+    
+    errval_t err;
+
+    struct aos_rpc_ram_cap_req_payload *payload = (struct aos_rpc_ram_cap_req_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct lmp_chan *lc = rpc->channel;
+
+    err = lmp_chan_send3(lc, 0, NULL_CAP, GET_RAM_CAP, payload->bytes, payload->alignment);
+    while (err_is_fail(err)) {
+        DEBUG_ERR(err, "sending ram cap req in handler\n");
+        abort();
+    }
+
+    // debug_printf("ram cap request sent!\n");
+}
+
 /**
  * @brief Request a RAM capability with >= bytes of size
  *
@@ -183,6 +249,31 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
     // TODO: implement functionality to request a RAM capability over the
     // given channel and wait until it is delivered.
     // Hint: think about where the received cap will be stored
+    struct lmp_chan *lc = rpc->channel;
+    errval_t err;
+    
+    // marshall args into num payload
+    struct aos_rpc_ram_cap_req_payload payload;
+    payload.rpc = rpc;
+    payload.bytes = bytes;
+    payload.alignment = alignment;
+
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_ram_cap_req_handler, 
+                                 (void *) &payload));
+    
+    
+    // debug_printf("made it to the end of ram cap request sending\n");
+    event_dispatch(get_default_waitset());
+    event_dispatch(get_default_waitset());
+
+    if (capref_is_null(global_retcap)) {
+        debug_printf("downloading ram failed\n");
+        return LIB_ERR_RAM_ALLOC;
+    }
+
+    *ret_cap = global_retcap;
+    *ret_bytes = global_retbytes;
+    return SYS_ERR_OK;
     return SYS_ERR_OK;
 }
 
@@ -640,28 +731,57 @@ errval_t aos_rpc_init(struct aos_rpc *rpc) {
     return SYS_ERR_OK;
 }
 
-
 /**
  * \brief Returns the RPC channel to init.
  */
 struct aos_rpc *aos_rpc_get_init_channel(void)
 {
+    debug_printf("Entering aos_rpc_get_init_channel...\n");
     errval_t err;
     struct aos_rpc *rpc = global_rpc;
 
     if (global_rpc == NULL) {
+        debug_printf("Global RPC is NULL. Allocating a new aos_rpc structure...\n");
+
+        // Allocate memory for the RPC structure
         rpc = malloc(sizeof(struct aos_rpc));
-        printf("malloced rpc\n");
         if (rpc == NULL) {
+            debug_printf("Failed to allocate memory for aos_rpc structure.\n");
             return NULL;
         }
-        aos_rpc_init(rpc);
+        debug_printf("Allocated memory for aos_rpc at address: %p\n", (void *)rpc);
+
+        // Initialize the RPC structure
+        err = aos_rpc_init(rpc);
+        if (err_is_fail(err)) {
+            debug_printf("Failed to initialize aos_rpc: %s\n", err_getstring(err));
+            free(rpc);  // Clean up allocated memory on failure
+            return NULL;
+        }
+        debug_printf("Successfully initialized aos_rpc.\n");
+
+        // Accept the LMP channel
+        debug_printf("Attempting to accept the LMP channel...\n");
+  
+
         err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
+        if (err_is_fail(err)) {
+            debug_printf("Failed to accept LMP channel: %s\n", err_getstring(err));
+            free(rpc);  // Clean up allocated memory on failure
+            return NULL;
+        }
+        debug_printf("Successfully accepted the LMP channel.\n");
+    } else {
+        debug_printf("Global RPC already initialized. Reusing existing aos_rpc structure at address: %p\n", (void *)global_rpc);
     }
 
+    // Update global RPC pointer
     global_rpc = rpc;
+
+    debug_printf("Exiting aos_rpc_get_init_channel with aos_rpc at address: %p\n", (void *)rpc);
     return rpc;
 }
+
 
 /**
  * \brief Returns the channel to the memory server

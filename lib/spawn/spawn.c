@@ -266,9 +266,14 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     // step 6: setup the environment
     setup_args(si, argc, argv);
 
-    //err = spawn_setup_ipc(si, get_default_waitset(), gen_recv_handler);
+    // Add this call after setting up the arguments (setup_args) but before returning:
+    err = spawn_setup_ipc(si, get_default_waitset(), gen_recv_handler);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to set up IPC: %s\n", err_getstring(err));
+        return err;
+    }
 
-    
+
     return SYS_ERR_OK;
 }
 
@@ -633,7 +638,6 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
 }
 
 // setup the args and the environment
-// setup the args and the environment
 static errval_t setup_args(struct spawninfo *si, int argc, const char *argv[])
 {
     printf("invoking setup the args function\n");
@@ -865,62 +869,86 @@ errval_t spawn_cleanup(struct spawninfo *si)
  * the first time.
  */
 errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_handler_fn handler) {
-    // Make the compiler happy about unused parameters
-    (void)si;
-    (void)ws;
-    (void)handler;
+    debug_printf("Entering spawn_setup_ipc...\n");
 
     errval_t err;
 
     // Check the execution state of the process
+    debug_printf("Checking the process state...\n");
     if (si->state != SPAWN_STATE_READY) {
+        debug_printf("Process state is not READY. Current state: %d\n", si->state);
         return SPAWN_ERR_LOAD;
     }
+    debug_printf("Process state is READY.\n");
 
     // Create the struct aos_rpc
+    debug_printf("Allocating memory for aos_rpc structure...\n");
     struct aos_rpc *rpc = malloc(sizeof(struct aos_rpc));
     if (rpc == NULL) {
+        debug_printf("Failed to allocate memory for aos_rpc structure.\n");
         return SPAWN_ERR_LOAD;
     }
+    debug_printf("Allocated memory for aos_rpc at address: %p\n", (void *)rpc);
+
+    // Initialize the RPC channel
+    debug_printf("Initializing the RPC channel...\n");
     err = aos_rpc_init(rpc);
     if (err_is_fail(err)) {
-        debug_printf("Could not initialize RPC channel\n");
+        debug_printf("Failed to initialize RPC channel: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
         return err;
     }
+    debug_printf("Successfully initialized the RPC channel.\n");
 
     // Accept the LMP channel
+    debug_printf("Attempting to accept the LMP channel...\n");
     err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, cap_initep);
     if (err_is_fail(err)) {
-        debug_printf("Could not open channel to accept endpoints\n");
+        debug_printf("Failed to accept LMP channel: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
         return err;
     }
+    debug_printf("Successfully accepted the LMP channel.\n");
 
     // Set up the child's init endpoint capability
-    struct capref child_init_endpoint;
-    child_init_endpoint.cnode = si->child_selfep.cnode;
-    child_init_endpoint.slot = TASKCN_SLOT_INITEP;
+    struct capref child_init_endpoint = {
+        .cnode = si->child_selfep.cnode,
+        .slot = TASKCN_SLOT_INITEP
+    };
 
     // Copy the local capability of the LMP channel into the child's init endpoint slot
+    debug_printf("Copying local capability of LMP channel to child's init endpoint...\n");
+    debug_printf("Source cap: cnode = %u, slot = %u\n", rpc->channel->local_cap.cnode.cnode, rpc->channel->local_cap.slot);
+    debug_printf("Destination cap: cnode = %u, slot = %u\n", child_init_endpoint.cnode.cnode, child_init_endpoint.slot);
     err = cap_copy(child_init_endpoint, rpc->channel->local_cap);
     if (err_is_fail(err)) {
-        debug_printf("Error copying local capability to child's init endpoint\n");
+        debug_printf("Failed to copy local capability: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
         return err_push(err, LIB_ERR_CAP_COPY);
     }
+    debug_printf("Successfully copied local capability to child's init endpoint.\n");
 
     // Initialize the messaging channel for the process
+    debug_printf("Allocating receive slot for the LMP channel...\n");
     err = lmp_chan_alloc_recv_slot(rpc->channel);
     if (err_is_fail(err)) {
-        debug_printf("Could not allocate receive slot for LMP channel\n");
+        debug_printf("Failed to allocate receive slot for LMP channel: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
         return err;
     }
+    debug_printf("Successfully allocated receive slot for LMP channel.\n");
 
     // Register the handler for receiving messages
+    debug_printf("Registering the receive handler for the LMP channel...\n");
     err = lmp_chan_register_recv(rpc->channel, ws, MKCLOSURE((void (*)(void *))handler, (void *)rpc));
     if (err_is_fail(err)) {
-        debug_printf("Could not register receive handler\n");
+        debug_printf("Failed to register receive handler: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
         return err;
     }
+    debug_printf("Successfully registered the receive handler for the LMP channel.\n");
 
+    debug_printf("Exiting spawn_setup_ipc successfully.\n");
     return SYS_ERR_OK;
 }
 

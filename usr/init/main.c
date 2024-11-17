@@ -36,7 +36,10 @@ coreid_t my_core_id;
 struct platform_info platform_info;
 
 
-
+void gen_recv_handler(struct aos_rpc *rpc) {
+    (void)*rpc;
+    debug_printf("aa\n");
+}
 
 static int
 bsp_main(int argc, char *argv[]) {
@@ -183,6 +186,11 @@ int main(int argc, char *argv[])
             break;
         default:
             platform = "UNKNOWN";
+    }
+
+    err = cap_retype(cap_selfep, cap_dispatcher, 0, ObjType_EndPointLMP, 0);
+    if (err_is_fail(err)) {
+        return err_push(err, LIB_ERR_CAP_RETYPE);
     }
 
     // this print statement shoudl remain here

@@ -30,6 +30,8 @@ enum aos_rpc_transport {
 /// depending on your RPC implementation, maybe you want to slightly adapt this
 typedef void (*aos_recv_handler_fn)(struct aos_rpc *ac);
 
+// global receive handler
+void gen_recv_handler(struct aos_rpc *rpc);
 
 
 
@@ -83,6 +85,12 @@ enum msg_type {
     SPAWN_WITH_CAPS_MSG,
 };
 
+struct aos_rpc_ram_cap_req_payload {
+    struct aos_rpc *rpc;
+    size_t bytes;
+    size_t alignment;
+};
+
 /**
  * @brief Initialize an aos_rpc struct.
  *
@@ -96,8 +104,7 @@ errval_t aos_rpc_init(struct aos_rpc *rpc);
 void initialize_send_handler(void *arg);
 void init_acknowledgment_handler(void *arg);
 
-// global receive handler
-void gen_recv_handler(void *arg);
+
 
 
 /*
