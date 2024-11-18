@@ -25,7 +25,7 @@
 #include <aos/paging.h>
 #include <aos/morecore.h>
 #include <aos/morecore.h>
-
+#include <aos/aos_rpc.h>
 
 
 #define HEAP_ALLOC_SIZE (256 << 10)
@@ -267,7 +267,7 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     setup_args(si, argc, argv);
 
     // Add this call after setting up the arguments (setup_args) but before returning:
-    err = spawn_setup_ipc(si, get_default_waitset(), gen_recv_handler);
+    err = spawn_setup_ipc(si, get_default_waitset(), (aos_recv_handler_fn) gen_recv_handler);
     if (err_is_fail(err)) {
         debug_printf("Failed to set up IPC: %s\n", err_getstring(err));
         return err;
@@ -882,10 +882,6 @@ errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_hand
     // }
     // debug_printf("Process state is READY.\n");
 
-    
-
-    
-
     // Create the struct aos_rpc
     debug_printf("Allocating memory for aos_rpc structure...\n");
     struct aos_rpc *rpc = malloc(sizeof(struct aos_rpc));
@@ -917,7 +913,7 @@ errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_hand
     }
     debug_printf("Successfully accepted the LMP channel.\n");
 
- // Set up the child's init endpoint capability
+    // Set up the child's init endpoint capability
     struct capref child_init_endpoint = {
         .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
         .slot = TASKCN_SLOT_INITEP
@@ -928,9 +924,7 @@ errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_hand
     debug_printf("Copying local capability of LMP channel to child's init endpoint...\n");
     debug_printf("Source cap: cnode = %u, slot = %u\n", rpc->channel->local_cap.cnode.cnode, rpc->channel->local_cap.slot);
     debug_printf("Destination cap: cnode = %u, slot = %u\n", child_init_endpoint.cnode.cnode, child_init_endpoint.slot);
-    
-     debug_printf("reach here???\n");
-     debug_print_cap_at_capref(rpc->channel->local_cap);
+    debug_print_cap_at_capref(rpc->channel->local_cap);
 
      err = cap_copy(child_init_endpoint, rpc->channel->local_cap);
 
@@ -957,7 +951,7 @@ errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_hand
 
     // Register the handler for receiving messages
     debug_printf("Registering the receive handler for the LMP channel...\n");
-    err = lmp_chan_register_recv(rpc->channel, ws, MKCLOSURE((void (*)(void *))handler, (void *)rpc));
+    err = lmp_chan_register_recv(rpc->channel, ws, MKCLOSURE((void *) handler, (void *) rpc));
     if (err_is_fail(err)) {
         debug_printf("Failed to register receive handler: %s\n", err_getstring(err));
         free(rpc);  // Clean up allocated memory on failure

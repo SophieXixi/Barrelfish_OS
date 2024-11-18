@@ -28,10 +28,10 @@ enum aos_rpc_transport {
 
 /// type of the receive handler function.
 /// depending on your RPC implementation, maybe you want to slightly adapt this
-typedef void (*aos_recv_handler_fn)(struct aos_rpc *ac);
+typedef void (*aos_recv_handler_fn)(void *arg);
 
 // global receive handler
-void gen_recv_handler(struct aos_rpc *rpc);
+void gen_recv_handler(void *arg);
 
 
 

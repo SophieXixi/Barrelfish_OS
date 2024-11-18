@@ -110,7 +110,6 @@ void init_acknowledgment_handler(void *arg)
         global_retchar = msg.words[1];
         return;
     }
-    // debug_printf("received ack\n");
         
    // debug_printf("heres the address of rpc->waiting_on_ack from the ack pov: %p\n", &(rpc->waiting_on_ack));
     while (err_is_fail(err)) {
@@ -123,7 +122,7 @@ void init_acknowledgment_handler(void *arg)
 
 static void send_num_handler(void *arg)
 {
-    // debug_printf("got into send num handler\n");
+    debug_printf("got into send num handler\n");
     
     errval_t err;
     struct aos_rpc_num_payload *payload = (struct aos_rpc_num_payload *) arg;
@@ -141,7 +140,7 @@ static void send_num_handler(void *arg)
         abort();
     }
 
-    // debug_printf("number sent!\n");
+    debug_printf("number sent!\n");
 }
 
 /**
@@ -171,7 +170,7 @@ errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
     event_dispatch(get_default_waitset());
     
     free(payload);
-
+    debug_printf("Sent a number successfullly\n");
     return SYS_ERR_OK;
 }
 

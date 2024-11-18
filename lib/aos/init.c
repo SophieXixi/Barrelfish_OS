@@ -182,7 +182,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     }  
 
     /* set init RPC client in our program state */
-    //set_init_rpc(init_rpc);
+    set_init_rpc(init_rpc);
 
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here

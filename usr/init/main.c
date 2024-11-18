@@ -28,17 +28,78 @@
 #include "coreboot.h"
 
 
-
-
 struct bootinfo *bi;
 
 coreid_t my_core_id;
 struct platform_info platform_info;
 
 
-void gen_recv_handler(struct aos_rpc *rpc) {
-    (void)*rpc;
-    debug_printf("aa\n");
+void gen_recv_handler(void *arg) {
+    debug_printf("Enter the general recv handler\n");
+    struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
+    struct aos_rpc *rpc = arg;
+    errval_t err;
+    
+    struct capref remote_cap;
+    slot_alloc(&remote_cap);
+    err = lmp_chan_recv(rpc->channel, &msg, &remote_cap);
+    
+    // reregister receive handler
+    err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE((void *) init_acknowledgment_handler, arg));
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, err_getstring(err));
+        return;
+    }
+        
+    debug_printf("msg words[0]: %d\n", msg.words[0]);
+    switch(msg.words[0]) {
+        case ACK_MSG:
+            // is ack
+            debug_printf("why is init receiving acks!?!?\n");
+            break;
+
+        case SETUP_MSG:
+            // is cap setup message
+            rpc->channel->remote_cap = remote_cap;
+            while (err_is_fail(err)) {
+                debug_printf("\n\n\nlooks like the code ran\n\n\n");
+
+            }
+
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE((void *) init_acknowledgment_handler, (void *) rpc));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "registering send handler\n");
+                return;
+            }
+            event_dispatch(get_default_waitset());
+            break;
+
+        case NUM_MSG:
+            // is num
+            debug_printf("Hey, I know the message is Nnumber now!!\n");
+            while (err_is_fail(err)) {
+                debug_printf("\n\n\nlooks like the code ran\n\n\n");
+            }
+            grading_rpc_handle_number(msg.words[1]);
+            
+            debug_printf("here is the number we recieved: %d\n", msg.words[1]);
+
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, (void*) rpc));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "registering send handler\n");
+                return;
+            }
+            event_dispatch(get_default_waitset());
+            event_dispatch(get_default_waitset());
+            break;
+        default:
+            debug_printf("received unknown message type\n");
+            abort();
+    }
+
+    // allocate a new slot
+    // TODO: allocate only when needed
+    err = lmp_chan_alloc_recv_slot(rpc->channel);
 }
 
 static int
