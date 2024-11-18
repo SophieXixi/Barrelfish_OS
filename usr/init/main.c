@@ -45,7 +45,7 @@ void gen_recv_handler(void *arg) {
     err = lmp_chan_recv(rpc->channel, &msg, &remote_cap);
     
     // reregister receive handler
-    err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE((void *) init_acknowledgment_handler, arg));
+    err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE((void *) gen_recv_handler, arg));
     if (err_is_fail(err)) {
         DEBUG_ERR(err, err_getstring(err));
         return;
@@ -60,6 +60,7 @@ void gen_recv_handler(void *arg) {
 
         case SETUP_MSG:
             // is cap setup message
+            debug_printf("it is in the Set up meg\n");
             rpc->channel->remote_cap = remote_cap;
             while (err_is_fail(err)) {
                 debug_printf("\n\n\nlooks like the code ran\n\n\n");
@@ -81,7 +82,7 @@ void gen_recv_handler(void *arg) {
                 debug_printf("\n\n\nlooks like the code ran\n\n\n");
             }
             grading_rpc_handle_number(msg.words[1]);
-            
+
             debug_printf("here is the number we recieved: %d\n", msg.words[1]);
 
             err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, (void*) rpc));
@@ -96,7 +97,7 @@ void gen_recv_handler(void *arg) {
             debug_printf("received unknown message type\n");
             abort();
     }
-
+    debug_printf("out the switch!\n");
     // allocate a new slot
     // TODO: allocate only when needed
     err = lmp_chan_alloc_recv_slot(rpc->channel);
