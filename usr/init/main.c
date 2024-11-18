@@ -32,7 +32,37 @@ struct bootinfo *bi;
 
 coreid_t my_core_id;
 struct platform_info platform_info;
+void send_ack_handler(void *arg);
 
+
+int main_loop(struct waitset *ws);
+
+ int main_loop(struct waitset *ws)
+ {
+    // go into messaging main loop
+    while (true) {
+        errval_t err = event_dispatch(ws);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "in main event_dispatch loop");
+            return EXIT_FAILURE;
+        }
+    }
+    return EXIT_SUCCESS;
+ }
+
+void send_ack_handler(void *arg)
+{
+    debug_printf("sending ack\n");
+    struct aos_rpc *rpc = arg;
+    struct lmp_chan *chan = rpc->channel;
+    errval_t err;
+    err = lmp_chan_send1(chan, 0, NULL_CAP, ACK_MSG);
+    while (err_is_fail(err)) {
+        debug_printf("\n\n\n\n went into our error while loop\n\n\n\n");
+    }
+
+    debug_printf("ack sent\n");
+}
 
 void gen_recv_handler(void *arg) {
     debug_printf("Enter the general recv handler\n");
@@ -53,27 +83,22 @@ void gen_recv_handler(void *arg) {
         
     debug_printf("msg words[0]: %d\n", msg.words[0]);
     switch(msg.words[0]) {
-        case ACK_MSG:
-            // is ack
-            debug_printf("why is init receiving acks!?!?\n");
-            break;
+        // case SETUP_MSG:
+        //     // is cap setup message
+        //     debug_printf("it is in the Set up meg\n");
+        //     rpc->channel->remote_cap = remote_cap;
+        //     while (err_is_fail(err)) {
+        //         debug_printf("\n\n\nlooks like the code ran\n\n\n");
 
-        case SETUP_MSG:
-            // is cap setup message
-            debug_printf("it is in the Set up meg\n");
-            rpc->channel->remote_cap = remote_cap;
-            while (err_is_fail(err)) {
-                debug_printf("\n\n\nlooks like the code ran\n\n\n");
+        //     }
 
-            }
-
-            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE((void *) init_acknowledgment_handler, (void *) rpc));
-            if (err_is_fail(err)) {
-                DEBUG_ERR(err, "registering send handler\n");
-                return;
-            }
-            event_dispatch(get_default_waitset());
-            break;
+        //     err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE((void *) send_ack_handler, (void *) rpc));
+        //     if (err_is_fail(err)) {
+        //         DEBUG_ERR(err, "registering send handler\n");
+        //         return;
+        //     }
+        //     event_dispatch(get_default_waitset());
+        //     break;
 
         case NUM_MSG:
             // is num
@@ -85,19 +110,36 @@ void gen_recv_handler(void *arg) {
 
             debug_printf("here is the number we recieved: %d\n", msg.words[1]);
 
-            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, (void*) rpc));
+            event_dispatch(get_default_waitset());
+            break;
+        case STRING_MSG:
+            debug_printf("is string\n");
+            while (err_is_fail(err)) {
+                debug_printf("\n\n\nlooks like the code ran\n\n\n");
+            }
+
+            debug_printf("here is the length we recieved: %d\n", msg.words[1]);
+            debug_print_cap_at_capref(remote_cap);
+            void *buf;
+            err = paging_map_frame_attr(get_current_paging_state(), &buf, msg.words[1], remote_cap, VREGION_FLAGS_READ_WRITE);
+
+            // debug_printf("here is the string we recieved: %s\n", buf);
+            grading_rpc_handler_string(buf);
+
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
             if (err_is_fail(err)) {
                 DEBUG_ERR(err, "registering send handler\n");
                 return;
             }
-            event_dispatch(get_default_waitset());
-            event_dispatch(get_default_waitset());
             break;
+        
         default:
             debug_printf("received unknown message type\n");
             abort();
     }
+
     debug_printf("out the switch!\n");
+
     // allocate a new slot
     // TODO: allocate only when needed
     err = lmp_chan_alloc_recv_slot(rpc->channel);
@@ -169,6 +211,9 @@ bsp_main(int argc, char *argv[]) {
             abort();
         }
     }
+
+    
+    return main_loop(get_default_waitset());
 
     return EXIT_SUCCESS;
 }

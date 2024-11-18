@@ -174,6 +174,29 @@ errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
     return SYS_ERR_OK;
 }
 
+static void send_string_handler(void *arg)
+{
+    // debug_printf("got into send string handler\n");
+    
+    errval_t err;
+
+    // unpack the provided string and length
+    struct aos_rpc_string_payload *payload = (struct aos_rpc_string_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct capref frame = payload->frame;
+    size_t len = payload->len;
+    struct lmp_chan *lc = rpc->channel;
+    // debug_printf("printing frame:\n");
+    // debug_print_cap_at_capref(frame);
+
+    err = lmp_chan_send2(lc, 0, frame, STRING_MSG, len);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "sending string in handler\n");
+        abort();
+    }
+
+    // debug_printf("string sent!\n");
+}
 
 /**
  * @brief Send a single number over an RPC channel.
@@ -187,12 +210,44 @@ errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
  */
 errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 {
+   errval_t err;
+    
     // make compiler happy about unused parameters
     (void)rpc;
     (void)string;
 
-    // TODO: implement functionality to send a string over the given channel
-    // and wait for a response.
+    // debug_printf("sending string\n");
+    struct lmp_chan *lc = rpc->channel;
+
+    // allocate and map a frame, copying to it the string contents
+    struct capref frame;
+    void *buf;
+    int len = strlen(string);
+    err = frame_alloc(&frame, len, NULL);
+   
+    err = paging_map_frame_attr(get_current_paging_state(), &buf, len, frame, VREGION_FLAGS_READ_WRITE);
+    strcpy(buf, string);
+
+    // pass the string frame and length in the payload
+    struct aos_rpc_string_payload *payload = malloc(sizeof(struct aos_rpc_string_payload));
+    payload->rpc = rpc;
+    // debug_print_cap_at_capref(frame);
+    //err = cap_copy(payload->frame, frame);
+    payload->frame = frame;
+    // debug_print_cap_at_capref(payload->frame);
+    payload->len = len;
+
+    // send the frame and the length on the channel
+    err = lmp_chan_alloc_recv_slot(lc);
+   
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_string_handler, (void *)payload));
+    
+    event_dispatch(get_default_waitset());
+    event_dispatch(get_default_waitset());
+    // check for an ack
+   
+    free(payload);
+
     return SYS_ERR_OK;
 }
 
@@ -284,6 +339,22 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
  * ===============================================================================================
  */
 
+static void send_getchar_handler(void *arg)
+{
+    debug_printf("got into send char handler\n");
+    
+    errval_t err;
+    struct aos_rpc *rpc = arg;
+    struct lmp_chan *lc = rpc->channel;
+
+    err = lmp_chan_send1(lc, 0, NULL_CAP, GETCHAR);
+    while (err_is_fail(err)) {
+        abort();
+    }
+
+    debug_printf("char sent!\n");
+}
+
 
 /**
  * @brief obtains a single character from the serial
@@ -296,11 +367,14 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
 errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
 {
     // make compiler happy about unused parameters
-    (void)rpc;
-    (void)retc;
+    struct lmp_chan *lc = rpc->channel;
+    errval_t err;
 
-    // TODO implement functionality to request a character from
-    // the serial driver.
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_getchar_handler, (void *) rpc));
+    event_dispatch(get_default_waitset());
+    event_dispatch(get_default_waitset());
+    *retc = global_retchar;
+
     return SYS_ERR_OK;
 }
 
@@ -366,26 +440,26 @@ errval_t aos_rpc_proc_spawn_with_caps(struct aos_rpc *chan, int argc, const char
     return LIB_ERR_NOT_IMPLEMENTED;
 }
 
-static void send_cmdline_handler(void* arg) {
-    // debug_printf("got into send cmdline handler\n");
+//static void send_cmdline_handler(void* arg) {
+    //debug_printf("got into send cmdline handler\n");
     
-    errval_t err;
+    // errval_t err;
 
-    // unpack the provided string and length
-    struct aos_rpc_cmdline_payload *payload = (struct aos_rpc_cmdline_payload *) arg;
-    struct aos_rpc *rpc = payload->rpc;
-    struct capref frame = payload->frame;
-    size_t len = payload->len;
-    struct lmp_chan *lc = rpc->channel;
+    // // unpack the provided string and length
+    // struct aos_rpc_cmdline_payload *payload = (struct aos_rpc_cmdline_payload *) arg;
+    // struct aos_rpc *rpc = payload->rpc;
+    // struct capref frame = payload->frame;
+    // size_t len = payload->len;
+    // struct lmp_chan *lc = rpc->channel;
 
-    err = lmp_chan_send3(lc, 0, frame, SPAWN_CMDLINE, len, payload->core);
-    while (err_is_fail(err)) {
-        DEBUG_ERR(err, "sending cmdline in handler\n");
-        abort();
-    }
+    // err = lmp_chan_send3(lc, 0, frame, SPAWN_CMDLINE, len, payload->core);
+    // while (err_is_fail(err)) {
+    //     DEBUG_ERR(err, "sending cmdline in handler\n");
+    //     abort();
+    // }
 
     // debug_printf("cmdline sent!\n");
-}
+//}
 
 /**
  * @brief requests a new process to be spawned with the supplied commandline
@@ -406,57 +480,57 @@ errval_t aos_rpc_proc_spawn_with_cmdline(struct aos_rpc *chan, const char *cmdli
     (void)core;
     (void)newpid;
 
-    errval_t err;
+    //errval_t err;
 
     // debug_printf("entered api for spawn cmdline\n");
     // debug_printf("here's the cmdline: %s\n", cmdline);
-    struct lmp_chan *lc = chan->channel;
+    // struct lmp_chan *lc = chan->channel;
 
-    // allocate and map a frame, copying to it the string contents
-    struct capref frame;
-    void *buf;
-    int len = strlen(cmdline);
+    // // allocate and map a frame, copying to it the string contents
+    // struct capref frame;
+    // void *buf;
+    // int len = strlen(cmdline);
   
 
-    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
-    if (err_is_fail(err)) {
-        debug_printf("could not allocate frame\n");
-    }    
+    // err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+    // if (err_is_fail(err)) {
+    //     debug_printf("could not allocate frame\n");
+    // }    
 
-    err = paging_map_frame_attr(get_current_paging_state(), &buf, BASE_PAGE_SIZE, frame, VREGION_FLAGS_READ_WRITE);
-    if (err_is_fail(err)) {
-        debug_printf("could not map frame\n");
-    }    
-
-
-    strcpy(buf, cmdline);
-
-    // pass the string frame and length in the payload
-    struct aos_rpc_cmdline_payload *payload = malloc(sizeof(struct aos_rpc_cmdline_payload));
-    payload->rpc = chan;
-    payload->frame = frame;
-    payload->len = len;
-    payload->core = core;
-    // debug_printf("here is the initial value of pid: %d\n", global_pid);
-
-    // send the frame and the length on the channel
-    err = lmp_chan_alloc_recv_slot(lc);
-    if (err_is_fail(err)) {
-        debug_printf("could not lmp_chan_alloc_recv_slot\n");
-    }
+    // err = paging_map_frame_attr(get_current_paging_state(), &buf, BASE_PAGE_SIZE, frame, VREGION_FLAGS_READ_WRITE);
+    // if (err_is_fail(err)) {
+    //     debug_printf("could not map frame\n");
+    // }    
 
 
-    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_cmdline_handler, (void *)payload));
-    if (err_is_fail(err)) {
-        debug_printf("could not lmp_chan_register_send\n");
-    }
+    // strcpy(buf, cmdline);
 
-    event_dispatch(get_default_waitset());
-    event_dispatch(get_default_waitset());
+    // // pass the string frame and length in the payload
+    // struct aos_rpc_cmdline_payload *payload = malloc(sizeof(struct aos_rpc_cmdline_payload));
+    // payload->rpc = chan;
+    // payload->frame = frame;
+    // payload->len = len;
+    // payload->core = core;
+    // // debug_printf("here is the initial value of pid: %d\n", global_pid);
+
+    // // send the frame and the length on the channel
+    // err = lmp_chan_alloc_recv_slot(lc);
+    // if (err_is_fail(err)) {
+    //     debug_printf("could not lmp_chan_alloc_recv_slot\n");
+    // }
+
+
+    // err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_cmdline_handler, (void *)payload));
+    // if (err_is_fail(err)) {
+    //     debug_printf("could not lmp_chan_register_send\n");
+    // }
+
+    // event_dispatch(get_default_waitset());
+    // event_dispatch(get_default_waitset());
   
-    *newpid = global_pid;
+    // *newpid = global_pid;
 
-    free(payload);
+    // free(payload);
     
     return SYS_ERR_OK;
 }

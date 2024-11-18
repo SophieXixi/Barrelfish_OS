@@ -61,6 +61,13 @@ struct aos_rpc_cmdline_payload {
            domainid_t pid;
 };
 
+struct aos_rpc_string_payload {
+    struct aos_rpc *rpc;
+    struct capref frame;
+    size_t len;
+};
+
+
 void setup_receive_handler(struct aos_rpc *rpc);
 void receive_number_handler(void *arg);
 
