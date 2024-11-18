@@ -65,7 +65,7 @@ void send_ack_handler(void *arg)
 }
 
 void gen_recv_handler(void *arg) {
-    debug_printf("Enter the general recv handler\n");
+    debug_printf("Enter the general recv handler!!!!\n");
     struct lmp_recv_msg msg = LMP_RECV_MSG_INIT;
     struct aos_rpc *rpc = arg;
     errval_t err;
@@ -83,22 +83,22 @@ void gen_recv_handler(void *arg) {
         
     debug_printf("msg words[0]: %d\n", msg.words[0]);
     switch(msg.words[0]) {
-        // case SETUP_MSG:
-        //     // is cap setup message
-        //     debug_printf("it is in the Set up meg\n");
-        //     rpc->channel->remote_cap = remote_cap;
-        //     while (err_is_fail(err)) {
-        //         debug_printf("\n\n\nlooks like the code ran\n\n\n");
+        case SETUP_MSG:
+            // is cap setup message
+            debug_printf("it is in the Set up meg\n");
+            rpc->channel->remote_cap = remote_cap;
+            while (err_is_fail(err)) {
+                debug_printf("\n\n\nlooks like the code ran\n\n\n");
 
-        //     }
+            }
 
-        //     err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE((void *) send_ack_handler, (void *) rpc));
-        //     if (err_is_fail(err)) {
-        //         DEBUG_ERR(err, "registering send handler\n");
-        //         return;
-        //     }
-        //     event_dispatch(get_default_waitset());
-        //     break;
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE((void *) send_ack_handler, (void *) rpc));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "registering send handler\n");
+                return;
+            }
+            event_dispatch(get_default_waitset());
+            break;
 
         case NUM_MSG:
             // is num
