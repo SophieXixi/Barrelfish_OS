@@ -64,6 +64,7 @@ struct spawninfo {
     genvaddr_t entry_addr;
     struct mem_region *module;              ///< Program entry point
 
+    struct spawninfo *nextSpawn;
 
     // L1 CNODE REPRESENTING CSPACE
     struct capref l1_cap;
@@ -101,6 +102,9 @@ struct spawninfo {
     struct spawninfo **children;
     size_t num_children;
     struct capref child_selfep;
+    
+    // memory pages allocated
+    int pages_allocated;
     
 
 };

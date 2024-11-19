@@ -31,9 +31,7 @@ char global_retchar;
  * ===============================================================================================
  */
 
-void 
-
-initialize_send_handler(void *arg)
+void initialize_send_handler(void *arg)
 {
     debug_printf("callback to invoke the send_handler\n");
     struct aos_rpc *rpc = arg;
@@ -42,8 +40,8 @@ initialize_send_handler(void *arg)
     err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
 
 
-    debug_printf("Checking local_cap: cnode = %u, slot = %u\n",
-             rpc->channel->local_cap.cnode.cnode, rpc->channel->local_cap.slot);
+    // debug_printf("Checking local_cap: cnode = %u, slot = %u\n",
+    //          rpc->channel->local_cap.cnode.cnode, rpc->channel->local_cap.slot);
 
     struct capability cap_info;
     err = invoke_cap_identify(rpc->channel->local_cap, &cap_info);
@@ -103,20 +101,13 @@ void init_acknowledgment_handler(void *arg)
         return;
     } else if (msg.words[0] == RAM_CAP_ACK) {
         err = lmp_chan_alloc_recv_slot(rpc->channel);
-        // debug_printf("received ram cap size: %d\n", msg.words[1]);
         global_retcap = retcap;
         global_retbytes = msg.words[1];
         return;
     } else if (msg.words[0] == GETCHAR_ACK) {
         err = lmp_chan_alloc_recv_slot(rpc->channel);
-        // debug_printf("received char: %c\n", msg.words[1]);
         global_retchar = msg.words[1];
         return;
-    }
-        
-   // debug_printf("heres the address of rpc->waiting_on_ack from the ack pov: %p\n", &(rpc->waiting_on_ack));
-    while (err_is_fail(err)) {
-        // debug_printf("\n\n\n\nthis actually ran (ack recv handler)\n\n\n\n\n");
     }
 
     err = lmp_chan_alloc_recv_slot(rpc->channel);
@@ -168,7 +159,6 @@ errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
     err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_num_handler, (void *) payload));
     
     
-    // debug_printf("made it to the end of number sending\n");
     event_dispatch(get_default_waitset());
     event_dispatch(get_default_waitset());
     
@@ -179,18 +169,19 @@ errval_t aos_rpc_send_number(struct aos_rpc *rpc, uintptr_t num)
 
 static void send_string_handler(void *arg)
 {
-    // debug_printf("got into send string handler\n");
     
     errval_t err;
 
     // unpack the provided string and length
     struct aos_rpc_string_payload *payload = (struct aos_rpc_string_payload *) arg;
+
     struct aos_rpc *rpc = payload->rpc;
     struct capref frame = payload->frame;
     size_t len = payload->len;
     struct lmp_chan *lc = rpc->channel;
-    // debug_printf("printing frame:\n");
-    // debug_print_cap_at_capref(frame);
+
+    debug_printf("printing frame:\n");
+    debug_print_cap_at_capref(frame);
 
     err = lmp_chan_send2(lc, 0, frame, STRING_MSG, len);
     if (err_is_fail(err)) {
@@ -198,7 +189,7 @@ static void send_string_handler(void *arg)
         abort();
     }
 
-    // debug_printf("string sent!\n");
+    debug_printf("Sent a string successfullly\n");
 }
 
 /**
@@ -219,10 +210,10 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
     (void)rpc;
     (void)string;
 
-    // debug_printf("sending string\n");
     struct lmp_chan *lc = rpc->channel;
 
     // allocate and map a frame, copying to it the string contents
+    // We will actually send this frame cap
     struct capref frame;
     void *buf;
     int len = strlen(string);
@@ -233,21 +224,21 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 
     // pass the string frame and length in the payload
     struct aos_rpc_string_payload *payload = malloc(sizeof(struct aos_rpc_string_payload));
+
     payload->rpc = rpc;
-    // debug_print_cap_at_capref(frame);
-    //err = cap_copy(payload->frame, frame);
+  
     payload->frame = frame;
-    // debug_print_cap_at_capref(payload->frame);
+   
     payload->len = len;
 
-    // send the frame and the length on the channel
+    
     err = lmp_chan_alloc_recv_slot(lc);
    
+   // send the frame and the length on the channel
     err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_string_handler, (void *)payload));
     
     event_dispatch(get_default_waitset());
     event_dispatch(get_default_waitset());
-    // check for an ack
    
     free(payload);
 
@@ -263,11 +254,12 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
 
 
 static void send_ram_cap_req_handler(void* arg) {
-    // debug_printf("got into send ram cap req handler\n");
+    debug_printf("got into send ram cap req handler\n");
     
     errval_t err;
 
     struct aos_rpc_ram_cap_req_payload *payload = (struct aos_rpc_ram_cap_req_payload *) arg;
+    
     struct aos_rpc *rpc = payload->rpc;
     struct lmp_chan *lc = rpc->channel;
 
@@ -277,7 +269,7 @@ static void send_ram_cap_req_handler(void* arg) {
         abort();
     }
 
-    // debug_printf("ram cap request sent!\n");
+    debug_printf("ram cap request sent!\n");
 }
 
 /**
@@ -296,20 +288,10 @@ static void send_ram_cap_req_handler(void* arg) {
 errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment,
                              struct capref *ret_cap, size_t *ret_bytes)
 {
-    // make compiler happy about unused parameters
-    (void)rpc;
-    (void)bytes;
-    (void)alignment;
-    (void)ret_cap;
-    (void)ret_bytes;
 
-    // TODO: implement functionality to request a RAM capability over the
-    // given channel and wait until it is delivered.
-    // Hint: think about where the received cap will be stored
     struct lmp_chan *lc = rpc->channel;
     errval_t err;
     
-    // marshall args into num payload
     struct aos_rpc_ram_cap_req_payload payload;
     payload.rpc = rpc;
     payload.bytes = bytes;
@@ -318,8 +300,6 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
     err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_ram_cap_req_handler, 
                                  (void *) &payload));
     
-    
-    // debug_printf("made it to the end of ram cap request sending\n");
     event_dispatch(get_default_waitset());
     event_dispatch(get_default_waitset());
 
@@ -330,7 +310,6 @@ errval_t aos_rpc_get_ram_cap(struct aos_rpc *rpc, size_t bytes, size_t alignment
 
     *ret_cap = global_retcap;
     *ret_bytes = global_retbytes;
-    return SYS_ERR_OK;
     return SYS_ERR_OK;
 }
 
@@ -381,6 +360,21 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
     return SYS_ERR_OK;
 }
 
+static void send_putchar_handler(void *arg) {
+    debug_printf("Get into send putchar handler\n");
+    
+    errval_t err;
+    struct aos_rpc_num_payload *payload = (struct aos_rpc_num_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct lmp_chan *lc = rpc->channel;
+    uintptr_t c = payload->val;
+
+    err = lmp_chan_send2(lc, 0, NULL_CAP, PUTCHAR, c);
+    while (err_is_fail(err)) {
+        DEBUG_ERR(err, "sending putchar in handler\n");
+        abort();
+    }
+}
 
 
 /**
@@ -393,14 +387,28 @@ errval_t aos_rpc_serial_getchar(struct aos_rpc *rpc, char *retc)
  */
 errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
 {
-    // make compiler happy about unused parameters
-    (void)rpc;
-    (void)c;
+    // TODO: implement functionality to send a number over the channel
+    // given channel and wait until the ack gets returned.
 
-    // TODO implement functionality to send a character to the
-    // serial port.
+    struct lmp_chan *lc = rpc->channel;
+    errval_t err;
+    
+
+    struct aos_rpc_num_payload payload;
+    payload.rpc = rpc;
+    payload.val = c;
+    
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_putchar_handler, (void *)&payload));
+
+
+    event_dispatch(get_default_waitset());
+    event_dispatch(get_default_waitset());
+
     return SYS_ERR_OK;
 }
+
+
+
 
 
 /*
@@ -866,8 +874,7 @@ struct aos_rpc *aos_rpc_get_memory_channel(void)
 {
     // TODO: Return channel to talk to memory server process (or whoever
     // implements memory server functionality)
-    debug_printf("aos_rpc_get_memory_channel NYI\n");
-    return NULL;
+    return aos_rpc_get_init_channel();
 }
 
 /**
@@ -888,8 +895,7 @@ struct aos_rpc *aos_rpc_get_serial_channel(void)
 {
     // TODO: Return channel to talk to serial driver/terminal process (whoever
     // implements print/read functionality)
-    debug_printf("aos_rpc_get_serial_channel NYI\n");
-    return NULL;
+    return aos_rpc_get_init_channel();
 }
 
 

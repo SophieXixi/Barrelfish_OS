@@ -32,7 +32,7 @@ typedef void (*aos_recv_handler_fn)(void *arg);
 
 // global receive handler
 void gen_recv_handler(void *arg);
-
+#define MAX_PROC_PAGES 1 << 16   // 256 mib (65536 pages)
 
 
 /**
@@ -46,6 +46,7 @@ struct aos_rpc {
     struct capref remote_cap;         // Capability to the remote endpoint
     struct waitset *ws;               // Waitset for non-blocking communication
     bool waiting_for_reply;           // Flag to indicate waiting for a reply
+    domainid_t pid;
 };
 
 struct aos_rpc_num_payload {
@@ -59,6 +60,12 @@ struct aos_rpc_cmdline_payload {
            size_t     len;
            coreid_t   core;
            domainid_t pid;
+};
+
+struct aos_rpc_ram_cap_resp_payload {
+    struct aos_rpc *rpc;
+    struct capref ret_cap;
+    size_t ret_bytes;
 };
 
 struct aos_rpc_string_payload {

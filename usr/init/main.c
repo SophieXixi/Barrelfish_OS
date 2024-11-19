@@ -23,6 +23,7 @@
 #include <mm/mm.h>
 #include <grading/grading.h>
 #include <grading/io.h>
+#include <spawn/spawn.h>
 
 #include "mem_alloc.h"
 #include "coreboot.h"
@@ -31,9 +32,11 @@
 struct bootinfo *bi;
 
 coreid_t my_core_id;
+struct spawninfo* root = NULL;
 struct platform_info platform_info;
 void send_ack_handler(void *arg);
-
+void send_char_handler(void *arg);
+void send_ramCp_handler(void *arg);
 
 int main_loop(struct waitset *ws);
 
@@ -57,11 +60,50 @@ void send_ack_handler(void *arg)
     struct lmp_chan *chan = rpc->channel;
     errval_t err;
     err = lmp_chan_send1(chan, 0, NULL_CAP, ACK_MSG);
-    while (err_is_fail(err)) {
-        debug_printf("\n\n\n\n went into our error while loop\n\n\n\n");
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed in the send ack handler\n");
+        return;
     }
 
     debug_printf("ack sent\n");
+}
+
+
+void send_char_handler(void *arg)
+{
+    debug_printf("sending char\n");
+    struct aos_rpc_num_payload *payload = arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct lmp_chan *chan = rpc->channel;
+    char c = payload->val;
+    errval_t err;
+    err = lmp_chan_send2(chan, 0, NULL_CAP, GETCHAR_ACK, c);
+    if (err_is_fail(err)) {
+        USER_PANIC_ERR(err, "failed sending char\n");
+    }
+
+    free(payload);
+
+    debug_printf("char sent: %c\n", c);
+}
+
+
+void send_ramCp_handler(void *arg) 
+{
+    debug_printf("sending ram cap response\n");
+    struct aos_rpc_ram_cap_resp_payload* resp = arg;
+    struct lmp_chan *chan = resp->rpc->channel;
+
+    debug_printf("sent ram cap size: %d\n", resp->ret_bytes);
+    errval_t err = lmp_chan_send2(chan, 0, resp->ret_cap, RAM_CAP_ACK, resp->ret_bytes);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed in the Send Ram CAP handler\n");
+        return;
+    }
+
+    free(resp);
+
+    debug_printf("ram cap resp sent\n");
 }
 
 void gen_recv_handler(void *arg) {
@@ -85,12 +127,8 @@ void gen_recv_handler(void *arg) {
     switch(msg.words[0]) {
         case SETUP_MSG:
             // is cap setup message
-            debug_printf("it is in the Set up meg\n");
+            debug_printf("This is Setup case in the gen_recv_handler\n");
             rpc->channel->remote_cap = remote_cap;
-            while (err_is_fail(err)) {
-                debug_printf("\n\n\nlooks like the code ran\n\n\n");
-
-            }
 
             err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE((void *) send_ack_handler, (void *) rpc));
             if (err_is_fail(err)) {
@@ -103,9 +141,7 @@ void gen_recv_handler(void *arg) {
         case NUM_MSG:
             // is num
             debug_printf("Hey, I know the message is Nnumber now!!\n");
-            while (err_is_fail(err)) {
-                debug_printf("\n\n\nlooks like the code ran\n\n\n");
-            }
+    
             grading_rpc_handle_number(msg.words[1]);
 
             debug_printf("here is the number we recieved: %d\n", msg.words[1]);
@@ -113,17 +149,14 @@ void gen_recv_handler(void *arg) {
             event_dispatch(get_default_waitset());
             break;
         case STRING_MSG:
-            debug_printf("is string\n");
-            while (err_is_fail(err)) {
-                debug_printf("\n\n\nlooks like the code ran\n\n\n");
-            }
+            debug_printf("This is String in the gen_recv_handler\n");;
 
             debug_printf("here is the length we recieved: %d\n", msg.words[1]);
             debug_print_cap_at_capref(remote_cap);
             void *buf;
             err = paging_map_frame_attr(get_current_paging_state(), &buf, msg.words[1], remote_cap, VREGION_FLAGS_READ_WRITE);
 
-            // debug_printf("here is the string we recieved: %s\n", buf);
+            debug_printf("here is the string we recieved: %s\n", buf);
             grading_rpc_handler_string(buf);
 
             err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
@@ -132,15 +165,82 @@ void gen_recv_handler(void *arg) {
                 return;
             }
             break;
+        case GET_RAM_CAP:
+            struct aos_rpc_ram_cap_resp_payload* resp = malloc(sizeof(struct aos_rpc_ram_cap_resp_payload));
+             
+            resp->rpc = rpc;
+            resp->ret_cap = NULL_CAP;
+            resp->ret_bytes = 0;
+            
+            // check that process hasn't exceeded mem limit
+            struct spawninfo* curr = root;
+            while (curr->nextSpawn != NULL) {
+                if (curr->pid == rpc->pid)
+                    break;
+                curr = curr->nextSpawn;
+            }
+            if (curr->pages_allocated + ROUND_UP(msg.words[1], BASE_PAGE_SIZE) / BASE_PAGE_SIZE <= 
+                MAX_PROC_PAGES) 
+            {
+                err = ram_alloc_aligned(&resp->ret_cap, msg.words[1], msg.words[2]);
+                if (err_is_fail(err)) {
+                    DEBUG_ERR(err, "failed to allocate ram for child process\n");
+                    return;
+                }
+                resp->ret_bytes = ROUND_UP(msg.words[1], BASE_PAGE_SIZE);
+
+                grading_rpc_handler_ram_cap(resp->ret_bytes, msg.words[2]);
+            }
+
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), 
+                                         MKCLOSURE(send_ramCp_handler, (void*) resp));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "registering send handler\n");
+                return;
+            }
+            
+            break;
+        case PUTCHAR:
+            debug_printf("recieved putchar message\n");
+            
+            grading_rpc_handler_serial_putchar(msg.words[1]);
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, err_getstring(err));
+                return;
+            }
+            break;
+            
+         case GETCHAR:
+            // debug_printf("recieved getchar message\n");
+            while (err_is_fail(err)) {
+                USER_PANIC_ERR(err, "registering receive handler\n");
+            }
+            
+            // how to get the value of the char??
+            char getChar = 'A';
         
+            // build getchar response message payload
+            struct aos_rpc_num_payload *num_payload = malloc(sizeof(struct aos_rpc_num_payload));
+            num_payload->rpc = rpc;
+            num_payload->val = getChar;
+
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_char_handler, (void*) num_payload));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, err_getstring(err));
+                return;
+            }
+
+            event_dispatch(get_default_waitset());
+            event_dispatch(get_default_waitset());
+
+            break;
         default:
             debug_printf("received unknown message type\n");
             abort();
     }
 
-    debug_printf("out the switch!\n");
 
-    // allocate a new slot
     // TODO: allocate only when needed
     err = lmp_chan_alloc_recv_slot(rpc->channel);
 }
