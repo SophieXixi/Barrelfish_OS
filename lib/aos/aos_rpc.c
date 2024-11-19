@@ -53,7 +53,10 @@ initialize_send_handler(void *arg)
         debug_printf("local_cap is valid. Capability type: %u\n", cap_info.type);
     }
 
-    err = lmp_chan_send1(rpc->channel, 0, NULL_CAP, SETUP_MSG);
+    debug_printf("rpc->channel->local->cap\n");
+    debug_print_cap_at_capref(rpc->channel->local_cap);
+
+    err = lmp_chan_send1(rpc->channel, 0, rpc->channel->local_cap, SETUP_MSG);
     if (err_is_fail(err)) {
 
         // Failed here

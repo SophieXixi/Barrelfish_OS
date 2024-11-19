@@ -540,12 +540,21 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
     }
 
 
-    struct capref selfep;
-    err = cap_retype(selfep, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+    // struct capref selfep;
+    // err = cap_retype(selfep, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+
+    // si->selfep_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
+    // si->selfep_cap.slot = TASKCN_SLOT_SELFEP;
+    // err = cap_copy(si->selfep_cap, selfep);
+    // if (err_is_fail(err)) {
+    //     printf("Failed to copy, %s\n");
+    // }
+
 
     si->selfep_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
     si->selfep_cap.slot = TASKCN_SLOT_SELFEP;
-    cap_copy(si->selfep_cap, selfep);
+    err = cap_retype(si->selfep_cap, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+
     printf("Remote endpoint capability set SPAWN:\n");
     printf("  cnode.croot = %u, cnode.cnode = %u, cnode.level = %u\n", 
            si->selfep_cap.cnode.croot, si->selfep_cap.cnode.cnode, si->selfep_cap.cnode.level);

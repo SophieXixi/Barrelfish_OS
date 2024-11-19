@@ -166,8 +166,11 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
         debug_printf("could not allocate receive slot for LMP Channel\n");
     }   
 
-    debug_printf("print cap_initep\n");
-    debug_print_cap_at_capref(cap_initep);
+    debug_printf("print remote\n");
+    debug_print_cap_at_capref(init_rpc->channel->remote_cap);
+
+    debug_printf("print local\n");
+    debug_print_cap_at_capref(init_rpc->channel->local_cap);
 
     // /* send local ep to init */
     err = lmp_chan_register_send(init_rpc->channel, get_default_waitset(), MKCLOSURE(initialize_send_handler, (void *) init_rpc));
