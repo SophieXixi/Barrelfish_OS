@@ -194,13 +194,13 @@ void gen_recv_handler(void *arg) {
             // Step 2: Locate the requesting process using process manager
             debug_printf("Checking memory allocation limits for PID: %d\n", rpc->pid);
 
-            struct proc_status process_status;
-            err = proc_mgmt_get_status(rpc->pid, &process_status);
-            if (err_is_fail(err)) {
-                debug_printf("Error: Could not find process with PID: %d\n", rpc->pid);
-                free(ramResponse);
-                return;
-            }
+            // struct proc_status process_status;
+            // err = proc_mgmt_get_status(rpc->pid, &process_status);
+            // if (err_is_fail(err)) {
+            //     debug_printf("Error: Could not find process with PID: %d\n", rpc->pid);
+            //     free(ramResponse);
+            //     return;
+            // }
 
             if (proc_manager == NULL) {
                 debug_printf("Error: Process manager is not initialized\n");
