@@ -492,8 +492,8 @@ errval_t aos_rpc_proc_spawn_with_cmdline(struct aos_rpc *chan, const char *cmdli
 
     errval_t err;
 
-    debug_printf("entered api for spawn cmdline\n");
-    debug_printf("here's the cmdline: %s\n", cmdline);
+    debug_printf("Got in the RPC for spawn cmdline\n");
+    debug_printf("Here's the cmdline: %s\n", cmdline);
     struct lmp_chan *lc = chan->channel;
 
     // allocate and map a frame, copying to it the string contents
@@ -521,7 +521,7 @@ errval_t aos_rpc_proc_spawn_with_cmdline(struct aos_rpc *chan, const char *cmdli
     payload->frame = frame;
     payload->len = len;
     payload->core = core;
-    // debug_printf("here is the initial value of pid: %d\n", global_pid);
+    debug_printf("here is the initial value of pid: %d\n", global_pid);
 
     // send the frame and the length on the channel
     err = lmp_chan_alloc_recv_slot(lc);

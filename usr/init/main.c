@@ -48,6 +48,7 @@ struct platform_info platform_info;
 void send_ack_handler(void *arg);
 void send_char_handler(void *arg);
 void send_ramCp_handler(void *arg);
+void send_pid_handler(void *arg);
 
 int main_loop(struct waitset *ws);
 
@@ -115,6 +116,18 @@ void send_ramCp_handler(void *arg)
     free(resp);
 
     debug_printf("ram cap resp sent\n");
+}
+
+void send_pid_handler(void *arg) {
+    debug_printf("sending our pid handler\n");
+    struct aos_rpc_cmdline_payload *payload = arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct lmp_chan *chan = rpc->channel;
+    errval_t err;
+    err = lmp_chan_send2(chan, 0, NULL_CAP, PID_ACK, payload->pid);
+
+    free(payload);
+
 }
 
 void gen_recv_handler(void *arg) {
@@ -297,6 +310,27 @@ void gen_recv_handler(void *arg) {
 
             event_dispatch(get_default_waitset());
             event_dispatch(get_default_waitset());
+
+            break;
+         case SPAWN_CMDLINE:
+            debug_printf("This is SPAWN_CMDLINE case in the gen_recv_handler\n");
+          
+            struct aos_rpc_cmdline_payload *payload = malloc(sizeof(struct aos_rpc_cmdline_payload));
+            
+            debug_printf("Here is the length we recieved: %d\n", msg.words[1]);
+            void *buf2;
+            err = paging_map_frame_attr(get_current_paging_state(), &buf2, msg.words[1], remote_cap, VREGION_FLAGS_READ_WRITE);
+
+            domainid_t our_pid;
+            err = proc_mgmt_spawn_with_cmdline(buf2, msg.words[2], &our_pid);
+            if (err_is_fail(err)) {
+                debug_printf("spawn failed\n");
+            }
+
+            payload->pid = our_pid;
+            payload->rpc = rpc;
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_pid_handler, (void*) payload));
+            grading_rpc_handler_process_spawn(buf2, msg.words[2]);
 
             break;
         default:
