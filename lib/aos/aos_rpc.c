@@ -47,8 +47,6 @@ void initialize_send_handler(void *arg)
     err = invoke_cap_identify(rpc->channel->local_cap, &cap_info);
     if (err_is_fail(err)) {
         debug_printf("Invalid local_cap: %s\n", err_getstring(err));
-    } else {
-        debug_printf("local_cap is valid. Capability type: %u\n", cap_info.type);
     }
 
     debug_printf("rpc->channel->local->cap\n");
@@ -885,8 +883,7 @@ struct aos_rpc *aos_rpc_get_process_channel(void)
 {
     // TODO: Return channel to talk to process server process (or whoever
     // implements process server functionality)
-    debug_printf("aos_rpc_get_process_channel NYI\n");
-    return NULL;
+    return aos_rpc_get_init_channel();
 }
 
 /**

@@ -115,6 +115,7 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     si->child_frame_id = child_frame_id;
     si->mapped_elf = mapped_elf;
     si->module = module;
+
     // - create the elfimg struct from the module
     struct elfimg img;
     elfimg_init_from_module(&img, module);
@@ -289,6 +290,7 @@ static errval_t initialize_spawn_info(struct spawninfo *si, const char *binary_n
     si->exitcode = 0;
     si->children = NULL;
     si->num_children = 0;
+    si->pages_allocated = 256;
     printf("Initialized spawninfo for PID %u with binary %s\n", pid, si->binary_name);
     return SYS_ERR_OK;
 }
@@ -404,15 +406,12 @@ static errval_t setup_child_cspace(struct spawninfo *si)
                 si->earlymem_cap.cnode.croot, si->earlymem_cap.slot);
 
 
-
-
-
-if (err_is_fail(err)) {
-    debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
-    return err;
-} else {
-    debug_printf("EARLYMEM capability successfully copied to TASKCN_SLOT_EARLYMEM.\n");
-}
+    if (err_is_fail(err)) {
+        debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
+        return err;
+    } else {
+        debug_printf("EARLYMEM capability successfully copied to TASKCN_SLOT_EARLYMEM.\n");
+    }
 
         printf("CSPACE setup for child completed.\n");
     return SYS_ERR_OK;

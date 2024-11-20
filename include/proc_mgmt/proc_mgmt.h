@@ -37,8 +37,6 @@ __BEGIN_DECLS
 
 
 
-
-
 /**
  * @brief spawns a new process with the given arguments and capabilities on the given core.
  *

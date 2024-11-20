@@ -26,13 +26,12 @@
 #include <spawn/argv.h>
 
 #include "proc_mgmt.h"
-
+#include <proc_mgmt/proc_mgmt.h>
 
 extern struct bootinfo *bi;
 extern coreid_t         my_core_id;
 struct process_manager *proc_manager;
-
-
+struct spawninfo* root = NULL;
 
 
 
@@ -209,6 +208,7 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     pro_node->si->child_frame_id = child_frame_id;
     pro_node->si->mapped_elf = mapped_elf;
     pro_node->si->pid = *pid;
+    pro_node->si->nextSpawn = root;
 
     struct elfimg img;
     elfimg_init_from_module(&img, module);

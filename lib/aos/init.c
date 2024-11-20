@@ -134,6 +134,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RAM_ALLOC_INIT);
     }
+    ram_alloc_set(NULL);
 
     err = paging_init();
     if (err_is_fail(err)) {

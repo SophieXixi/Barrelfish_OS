@@ -27,12 +27,23 @@
 
 #include "mem_alloc.h"
 #include "coreboot.h"
+#include "proc_mgmt.h"
 
+#include <drivers/lpuart.h>
+#include <drivers/pl011.h>
+#include "proc_mgmt.h"
+#include <proc_mgmt/proc_mgmt.h>
+
+bool qemu;
+struct pl011_s *pl011;
+struct lpuart_s *lpuart;
+
+extern struct process_manager *proc_manager;
+extern void initialize_process_manager(struct process_manager **pm);
 
 struct bootinfo *bi;
-
 coreid_t my_core_id;
-struct spawninfo* root = NULL;
+
 struct platform_info platform_info;
 void send_ack_handler(void *arg);
 void send_char_handler(void *arg);
@@ -149,7 +160,7 @@ void gen_recv_handler(void *arg) {
             event_dispatch(get_default_waitset());
             break;
         case STRING_MSG:
-            debug_printf("This is String in the gen_recv_handler\n");;
+            debug_printf("This is String MSG in the gen_recv_handler\n");
 
             debug_printf("here is the length we recieved: %d\n", msg.words[1]);
             debug_print_cap_at_capref(remote_cap);
@@ -166,42 +177,94 @@ void gen_recv_handler(void *arg) {
             }
             break;
         case GET_RAM_CAP:
-            struct aos_rpc_ram_cap_resp_payload* resp = malloc(sizeof(struct aos_rpc_ram_cap_resp_payload));
-             
-            resp->rpc = rpc;
-            resp->ret_cap = NULL_CAP;
-            resp->ret_bytes = 0;
-            
-            // check that process hasn't exceeded mem limit
-            struct spawninfo* curr = root;
-            while (curr->nextSpawn != NULL) {
-                if (curr->pid == rpc->pid)
-                    break;
-                curr = curr->nextSpawn;
-            }
-            if (curr->pages_allocated + ROUND_UP(msg.words[1], BASE_PAGE_SIZE) / BASE_PAGE_SIZE <= 
-                MAX_PROC_PAGES) 
-            {
-                err = ram_alloc_aligned(&resp->ret_cap, msg.words[1], msg.words[2]);
-                if (err_is_fail(err)) {
-                    DEBUG_ERR(err, "failed to allocate ram for child process\n");
-                    return;
-                }
-                resp->ret_bytes = ROUND_UP(msg.words[1], BASE_PAGE_SIZE);
+            debug_printf("This is RAM CAP case in the gen_recv_handler\n");
 
-                grading_rpc_handler_ram_cap(resp->ret_bytes, msg.words[2]);
-            }
-
-            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), 
-                                         MKCLOSURE(send_ramCp_handler, (void*) resp));
-            if (err_is_fail(err)) {
-                DEBUG_ERR(err, "registering send handler\n");
+            // Step 1: Allocate memory for the response structure
+            struct aos_rpc_ram_cap_resp_payload *ramResponse = malloc(sizeof(struct aos_rpc_ram_cap_resp_payload));
+            if (ramResponse == NULL) {
+                debug_printf("Error: Failed to allocate memory for RAM response payload\n");
                 return;
             }
+            debug_printf("Successfully allocated memory for RAM response payload\n");
+
+            ramResponse->rpc = rpc;
+            ramResponse->ret_cap = NULL_CAP;
+            ramResponse->ret_bytes = 0;
+
+            // Step 2: Locate the requesting process using process manager
+            debug_printf("Checking memory allocation limits for PID: %d\n", rpc->pid);
+
+            struct proc_status process_status;
+            err = proc_mgmt_get_status(rpc->pid, &process_status);
+            if (err_is_fail(err)) {
+                debug_printf("Error: Could not find process with PID: %d\n", rpc->pid);
+                free(ramResponse);
+                return;
+            }
+
+            if (proc_manager == NULL) {
+                debug_printf("Error: Process manager is not initialized\n");
+                return;
+            }
+            debug_printf("Process manager initialized successfully\n");
+
+            // Get allocated pages and memory limits
+            struct process_node *proc_node = proc_manager->head;
             
+            // while (proc_node != NULL && proc_node->si->pid != rpc->pid) {
+            //     proc_node = proc_node->next;
+            // }
+
+            // if (proc_node == NULL) {
+            //     debug_printf("Error: Process node not found for PID: %d\n", rpc->pid);
+            //     free(ramResponse);
+            //     return;
+            // }
+
+            debug_printf("Current allocated pages: %d, Requested pages: %d, Max allowed pages: %d\n",
+                        proc_node->si->pages_allocated,
+                        ROUND_UP(msg.words[1], BASE_PAGE_SIZE) / BASE_PAGE_SIZE,
+                        MAX_PROC_PAGES);
+
+            // Step 3: Check memory limit
+            if (proc_node->si->pages_allocated + ROUND_UP(msg.words[1], BASE_PAGE_SIZE) / BASE_PAGE_SIZE <= MAX_PROC_PAGES) {
+                debug_printf("Memory allocation request is within limits. Proceeding to allocate RAM.\n");
+
+                err = ram_alloc_aligned(&ramResponse->ret_cap, msg.words[1], msg.words[2]);
+                if (err_is_fail(err)) {
+                    DEBUG_ERR(err, "Failed to allocate RAM for process\n");
+                    free(ramResponse);
+                    return;
+                }
+                ramResponse->ret_bytes = ROUND_UP(msg.words[1], BASE_PAGE_SIZE);
+
+                // Update process allocated pages
+                proc_node->si->pages_allocated += ROUND_UP(msg.words[1], BASE_PAGE_SIZE) / BASE_PAGE_SIZE;
+
+                debug_printf("Successfully allocated RAM. Capability: ");
+                debug_print_cap_at_capref(ramResponse->ret_cap);
+                debug_printf("Allocated bytes: %zu\n", ramResponse->ret_bytes);
+
+                grading_rpc_handler_ram_cap(ramResponse->ret_bytes, msg.words[2]);
+            } else {
+                debug_printf("Memory allocation request exceeds limits. No RAM allocated.\n");
+            }
+
+            // Step 4: Register send handler
+            debug_printf("Registering send handler to respond to the RAM request\n");
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(),
+                                        MKCLOSURE(send_ramCp_handler, (void *)ramResponse));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "Failed to register send handler\n");
+                free(ramResponse);
+                return;
+            }
+            debug_printf("Done in the RAM CAP case in Recv handler\n");
+
             break;
+
         case PUTCHAR:
-            debug_printf("recieved putchar message\n");
+            debug_printf("This is Put char case in the gen_recv_handler\n");
             
             grading_rpc_handler_serial_putchar(msg.words[1]);
             err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
@@ -212,18 +275,19 @@ void gen_recv_handler(void *arg) {
             break;
             
          case GETCHAR:
-            // debug_printf("recieved getchar message\n");
+            debug_printf("This is Get char case in the gen_recv_handler\n");
             while (err_is_fail(err)) {
                 USER_PANIC_ERR(err, "registering receive handler\n");
             }
-            
-            // how to get the value of the char??
-            char getChar = 'A';
-        
+
+            char c = 'A';
+          
+            grading_rpc_handler_serial_getchar();
+
             // build getchar response message payload
             struct aos_rpc_num_payload *num_payload = malloc(sizeof(struct aos_rpc_num_payload));
             num_payload->rpc = rpc;
-            num_payload->val = getChar;
+            num_payload->val = c;
 
             err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_char_handler, (void*) num_payload));
             if (err_is_fail(err)) {
@@ -245,9 +309,11 @@ void gen_recv_handler(void *arg) {
     err = lmp_chan_alloc_recv_slot(rpc->channel);
 }
 
+
 static int
 bsp_main(int argc, char *argv[]) {
     errval_t err;
+    initialize_process_manager(&proc_manager);
 
     // initialize the grading/testing subsystem
     // DO NOT REMOVE THE FOLLOWING LINE!
