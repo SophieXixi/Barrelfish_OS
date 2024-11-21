@@ -755,13 +755,19 @@ errval_t proc_mgmt_terminated(domainid_t pid, int status)
     //   - remove the process from the process table
     //   - clean up the state of the process
     //   - for M4: notify waiting processes
-    debug_printf("enter proc_mgmt_exit\n");
+    debug_printf("enter proc_mgmt_terminated\n");
     struct process_node * curr = proc_manager->head;
     while (curr != NULL) {
         if (curr->si->pid == pid) {
             curr->si->exitcode = status;
+             errval_t err = proc_mgmt_kill(pid);
+            if(err_is_fail(err)) {
+                USER_PANIC("process is not successfully terminated\n");
+            }
             curr->si->state = SPAWN_STATE_TERMINATED;
-            //proc_mgmt_kill(pid);
+           
+    
+            debug_printf("Process manager knows pid: %d, terminated\n");
             return SYS_ERR_OK;
         }
         curr = curr->next;
@@ -831,6 +837,7 @@ errval_t proc_mgmt_kill(domainid_t pid)
     while (current != NULL) {
         if (current->si->pid == pid) {
             // Attempt to kill the process
+            
             errval_t err = spawn_kill(current->si);
             if (err_is_fail(err)) {
                 USER_PANIC("Failed to kill process with PID %d: %s\n", pid, err_getstring(err));
