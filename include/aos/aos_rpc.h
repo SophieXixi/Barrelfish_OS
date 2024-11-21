@@ -34,6 +34,7 @@ typedef void (*aos_recv_handler_fn)(void *arg);
 void gen_recv_handler(void *arg);
 #define MAX_PROC_PAGES 1 << 16   // 256 mib (65536 pages)
 
+void send_exit_handler(void * arg);
 
 /**
  * @brief represents an RPC binding

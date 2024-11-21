@@ -26,6 +26,7 @@
 #include <aos/systime.h>
 #include <barrelfish_kpi/domain_params.h>
 #include <aos/aos_rpc.h>
+#include <proc_mgmt/proc_mgmt.h>
 
 
 #include "threads_priv.h"
@@ -45,6 +46,8 @@ __weak_reference(libc_exit, _exit);
 void libc_exit(int status)
 {
     debug_printf("libc exit NYI!\n");
+    //proc_mgmt_exit(status);
+    aos_rpc_proc_exit(aos_rpc_get_process_channel(), status);
     thread_exit(status);
     // If we're not dead by now, we wait
     while (1) {}

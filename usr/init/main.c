@@ -333,6 +333,23 @@ void gen_recv_handler(void *arg) {
             grading_rpc_handler_process_spawn(buf2, msg.words[2]);
 
             break;
+        case EXIT_MSG:
+            debug_printf("This is EXIT_MSG case in the gen_recv_handler\n");
+
+            void *buf3;
+            err = paging_map_frame_attr(get_current_paging_state(), &buf3, msg.words[1], remote_cap, VREGION_FLAGS_READ_WRITE);
+            int status = *((int *) buf3);
+            domainid_t pid8 = ((int*)buf3)[1];
+            // debug_printf("heres the status we recieved: %d\n", status);
+             proc_mgmt_terminated(pid8, status);
+            // debug_printf("made it to the end of receiving\n");
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "registering send handler\n");
+                return;
+            }
+            break;
+
         default:
             debug_printf("received unknown message type\n");
             abort();

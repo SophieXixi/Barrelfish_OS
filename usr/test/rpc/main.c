@@ -196,6 +196,49 @@ static void test_spawn_rpc(void)
 }
 
 
+// static void test_exit_rpc(void)
+// {
+//     errval_t err;
+
+//     // the core we want to spawn on, our own.
+//     coreid_t core = disp_get_core_id();
+
+//     grading_printf("test_exit_rpc(%s)\n", CMDLINE);
+
+
+//     grading_printf("spawn using proc_mgmt client.\n");
+//     domainid_t pid;
+//     err = proc_mgmt_spawn_with_cmdline(CMDLINE, core, &pid);
+//     if (err_is_fail(err)) {
+//         grading_test_fail("R1-4", "failed to load: %s\n", err_getstring(err));
+//         return;
+//     }
+
+//     grading_printf("waiting 5 seconds to give the other domain chance to run...\n");
+//     barrelfish_usleep(5000000);
+
+
+//     grading_printf("calling exit RPC directly.\n");
+
+//     struct aos_rpc *proc_rpc = aos_rpc_get_process_channel();
+//     if (!proc_rpc) {
+//         grading_test_fail("R1-4", "no proc_rpc channel set!\n");
+//         return;
+//     }
+
+//     err = aos_rpc_proc_spawn_with_cmdline(proc_rpc, CMDLINE, core, &pid);
+//     if (err_is_fail(err)) {
+//         grading_test_fail("R1-4", "failed to load: %s\n", err_getstring(err));
+//         return;
+//     }
+
+//     grading_printf("waiting 5 seconds to give the other domain chance to run...\n");
+//     barrelfish_usleep(5000000);
+
+//     grading_test_pass("R1-4", "test_spawn_rpc\n");
+// }
+
+
 int main(int argc, char *argv[])
 {
     (void)argc;

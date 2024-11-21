@@ -88,7 +88,7 @@ void init_acknowledgment_handler(void *arg)
         return;
     }
 
-     err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
+    err = lmp_chan_register_recv(rpc->channel, get_default_waitset(), MKCLOSURE(init_acknowledgment_handler, arg));
 
     // Verify if the received message is an acknowledgment message
     if (msg.words[0] == PID_ACK) {
@@ -615,6 +615,7 @@ errval_t aos_rpc_proc_get_status(struct aos_rpc *chan, domainid_t pid, coreid_t 
     (void)cmdline_max;
     (void)state;
     (void)exit_code;
+    
 
     // TODO: implement the process get status RPC
     DEBUG_ERR(LIB_ERR_NOT_IMPLEMENTED, "%s not implemented", __FUNCTION__);
@@ -726,9 +727,51 @@ errval_t aos_rpc_proc_exit(struct aos_rpc *chan, int status)
     (void)chan;
     (void)status;
 
+    struct lmp_chan *lc = chan->channel;
+    errval_t err;
+
+    struct capref frame;
+    void *buf;
+    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+    if (err_is_fail(err)) {
+        USER_PANIC("fram alloc failed\n");
+    }
+    err = paging_map_frame_attr(get_current_paging_state(), &buf, BASE_PAGE_SIZE, frame, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        USER_PANIC("map frame failed\n");
+    }
+    *((int *) buf) = status;
+    ((int *) buf)[1] = disp_get_domain_id();
+
+    // wrap the payload for handler 
+    struct aos_rpc_string_payload *payload = malloc(sizeof(struct aos_rpc_string_payload));
+    payload->rpc = chan;
+    payload->frame = frame;
+    payload->len = BASE_PAGE_SIZE;
+
+    err = lmp_chan_alloc_recv_slot(lc);
+    if (err_is_fail(err)) {
+        USER_PANIC("map frame failed\n");
+    }
+
+    //send pid and exit msg
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_exit_handler, (void *)payload));
+    if (err_is_fail(err)) {
+        USER_PANIC("map frame failed\n");
+    }
+    event_dispatch(get_default_waitset());
+    event_dispatch(get_default_waitset());
+
+
+    free(payload);
+
+    //err = aos_rpc_proc_kill(chan, disp_get_domain_id()); Processor manager halt the excecution
+
+    return SYS_ERR_OK;
+
     // TODO: implement the process exit RPC
-    DEBUG_ERR(LIB_ERR_NOT_IMPLEMENTED, "%s not implemented", __FUNCTION__);
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // DEBUG_ERR(LIB_ERR_NOT_IMPLEMENTED, "%s not implemented", __FUNCTION__);
+    // return LIB_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -919,6 +962,32 @@ errval_t err;
         abort();
     }
 }
+
+
+
+void send_exit_handler(void * arg) {
+    debug_printf("get into send exit handler\n");
+    
+    errval_t err;
+
+    // unpack the provided string and length
+    struct aos_rpc_string_payload *payload = (struct aos_rpc_string_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct capref frame = payload->frame;
+    size_t len = payload->len;
+    struct lmp_chan *lc = rpc->channel;
+
+
+
+    err = lmp_chan_send2(lc, 0, frame, EXIT_MSG, len);
+    if (err_is_fail(err)) {
+        USER_PANIC("sending exit message fialed:%s\n", err_getstring(err));
+    }
+
+    debug_printf("Sent exit msg\n");
+}
+
+
 
 // Register the receive handler
 void setup_receive_handler(struct aos_rpc *rpc)

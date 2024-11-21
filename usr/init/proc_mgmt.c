@@ -749,13 +749,26 @@ errval_t proc_mgmt_terminated(domainid_t pid, int status)
     (void)pid;
     (void)status;
 
-    USER_PANIC("functionality not implemented\n");
+    //USER_PANIC("functionality not implemented\n");
     // TODO:
     //   - find the process with the given PID and trigger the exit procedure
     //   - remove the process from the process table
     //   - clean up the state of the process
     //   - for M4: notify waiting processes
-    return LIB_ERR_NOT_IMPLEMENTED;
+    debug_printf("enter proc_mgmt_exit\n");
+    struct process_node * curr = proc_manager->head;
+    while (curr != NULL) {
+        if (curr->si->pid == pid) {
+            curr->si->exitcode = status;
+            curr->si->state = SPAWN_STATE_TERMINATED;
+            //proc_mgmt_kill(pid);
+            return SYS_ERR_OK;
+        }
+        curr = curr->next;
+    }
+
+    return SPAWN_ERR_DOMAIN_NOTFOUND;
+    //return LIB_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -778,16 +791,16 @@ errval_t proc_mgmt_wait(domainid_t pid, int *status)
 }
 
 
-/**
- * @brief tells the process manager than the process with pid has terminated.
+ /**
+  * @brief registers a channel to be triggered when the process exits
  *
- * @param[in] pid     process identifier of the process to wait for
- * @param[in] status  integer value with the given status
- *
- * @return SYS_ERR_OK on success, SPAWN_ERR_* on failure
- *
- * Note: this means the process has exited gracefully
- */
+ * @param[in] pid   the PID of the process to register a trigger for
+ * @param[in] t     channel type
+ * @param[in] chan  channel to be triggered
+ * @param[in] ws    the waitset to be used for the channel
+ * 
+ * @return SYS_ERR_OK on sucess, SPANW_ERR_* on failure
+ */ 
 errval_t proc_mgmt_register_wait(domainid_t pid, enum aos_rpc_transport t, void *chan,
                                  struct waitset *ws)
 {
