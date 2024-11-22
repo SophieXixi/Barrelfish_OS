@@ -441,9 +441,9 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 
             // copy the original capability into the new slot
             uintptr_t aligned_offset = current->base_addr - current->capability_base;
-            debug_printf("aligned_offset:%p\n", aligned_offset);
-            debug_printf("curren->base_addr:%p\n", current->base_addr);
-            debug_printf("current->capability_base:%p\n", current->capability_base);
+            // debug_printf("aligned_offset:%p\n", aligned_offset);
+            // debug_printf("curren->base_addr:%p\n", current->base_addr);
+            // debug_printf("current->capability_base:%p\n", current->capability_base);
             if (aligned_offset % alignment != 0) {
                 aligned_offset = aligned_offset + alignment - (aligned_offset % alignment);
             }
@@ -499,8 +499,8 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 errval_t mm_alloc_from_range_aligned(struct mm *mm, size_t base, size_t limit, size_t size,
                                      size_t alignment, struct capref *retcap)
 {
-    printf("Calling mm_alloc_aligned\n");   
-    printf("Before allocation - nslots: %u, space: %u\n", mm->ca->nslots, mm->ca->space);
+    // printf("Calling mm_alloc_aligned\n");   
+    // printf("Before allocation - nslots: %u, space: %u\n", mm->ca->nslots, mm->ca->space);
 
     // Alignment Validation 
     if (alignment < BASE_PAGE_SIZE || !is_power_of_two(alignment) || (alignment & (alignment - 1)) != 0) {
@@ -649,11 +649,11 @@ errval_t mm_free(struct mm *mm, struct capref cap)
     }
 
 
-    debug_printf("to free node: size %d base_adddr %p\n", c.u.ram.bytes, c.u.ram.base);
+    // debug_printf("to free node: size %d base_adddr %p\n", c.u.ram.bytes, c.u.ram.base);
     
-    debug_printf("found node: size %d base_addr %p\n", current->size, current->base_addr);
+    // debug_printf("found node: size %d base_addr %p\n", current->size, current->base_addr);
 
-    debug_printf("found node used or not: %d\n", current->used);
+    // debug_printf("found node used or not: %d\n", current->used);
 
     if (current == NULL) {
         return MM_ERR_NOT_FOUND;

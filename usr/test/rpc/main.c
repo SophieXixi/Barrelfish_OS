@@ -72,7 +72,7 @@ static void test_serial_rpc(void)
     }
 
     grading_printf("normal print character by character\n");
-    char *str = "hello world\n";
+    char *str = "hehe\n";
     for (size_t i = 0; i < strlen(str); i++) {
         err = aos_rpc_serial_putchar(serial_rpc, str[i]);
         if (err_is_fail(err)) {
@@ -252,6 +252,8 @@ int main(int argc, char *argv[])
     test_spawn_rpc();
 
     grading_printf("rpcclient done with tests...\n");
+
+    exit(EXIT_SUCCESS);
 
     return EXIT_SUCCESS;
 }

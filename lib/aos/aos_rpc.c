@@ -316,8 +316,10 @@ errval_t aos_rpc_send_string(struct aos_rpc *rpc, const char *string)
     err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_string_handler, (void *)payload));
     
     event_dispatch(get_default_waitset());
+    //debug_printf("between two dispatch\n");
     event_dispatch(get_default_waitset());
-   
+   //debug_printf("after two dispatch\n");
+
     free(payload);
 
     return SYS_ERR_OK;

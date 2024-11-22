@@ -159,7 +159,7 @@ void gen_recv_handler(void *arg) {
                 DEBUG_ERR(err, "registering send handler\n");
                 return;
             }
-            event_dispatch(get_default_waitset());
+            //event_dispatch(get_default_waitset());
             break;
 
         case NUM_MSG:
@@ -170,7 +170,7 @@ void gen_recv_handler(void *arg) {
 
             debug_printf("here is the number we recieved: %d\n", msg.words[1]);
 
-            event_dispatch(get_default_waitset());
+            //event_dispatch(get_default_waitset());
             break;
         case STRING_MSG:
             debug_printf("This is String MSG in the gen_recv_handler\n");
@@ -340,7 +340,7 @@ void gen_recv_handler(void *arg) {
             err = paging_map_frame_attr(get_current_paging_state(), &buf3, msg.words[1], remote_cap, VREGION_FLAGS_READ_WRITE);
             int status = *((int *) buf3);
             domainid_t pid8 = ((int*)buf3)[1];
-             proc_mgmt_terminated(pid8, status);
+            proc_mgmt_terminated(pid8, status);
             err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
             if (err_is_fail(err)) {
                 DEBUG_ERR(err, "registering send handler\n");
