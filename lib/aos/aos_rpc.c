@@ -968,11 +968,10 @@ errval_t err;
 
 
 void send_exit_handler(void * arg) {
-    debug_printf("get into send exit handler\n");
+    //debug_printf("get into send exit handler\n");
     
     errval_t err;
 
-    // unpack the provided string and length
     struct aos_rpc_string_payload *payload = (struct aos_rpc_string_payload *) arg;
     struct aos_rpc *rpc = payload->rpc;
     struct capref frame = payload->frame;
@@ -986,7 +985,7 @@ void send_exit_handler(void * arg) {
         USER_PANIC("sending exit message fialed:%s\n", err_getstring(err));
     }
 
-    debug_printf("Sent exit msg\n");
+    //debug_printf("Sent exit msg\n");
 }
 
 

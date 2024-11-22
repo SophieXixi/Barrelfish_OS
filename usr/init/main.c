@@ -339,8 +339,8 @@ void gen_recv_handler(void *arg) {
             void *buf3;
             err = paging_map_frame_attr(get_current_paging_state(), &buf3, msg.words[1], remote_cap, VREGION_FLAGS_READ_WRITE);
             int status = *((int *) buf3);
-            domainid_t pid8 = ((int*)buf3)[1];
-            proc_mgmt_terminated(pid8, status);
+            domainid_t pid = ((int*)buf3)[1];
+            proc_mgmt_terminated(pid, status);
             err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
             if (err_is_fail(err)) {
                 DEBUG_ERR(err, "registering send handler\n");
