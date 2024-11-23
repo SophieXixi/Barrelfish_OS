@@ -14,7 +14,7 @@
 
 #include <aos/aos.h>
 #include <aos/aos_rpc.h>
-
+#include <barrelfish_kpi/startup_arm.h>
 
 
 genvaddr_t global_urpc_frames[4];
@@ -110,6 +110,7 @@ void init_acknowledgment_handler(void *arg)
 
     err = lmp_chan_alloc_recv_slot(rpc->channel);
 }
+
 
 
 static void send_num_handler(void *arg)
@@ -238,6 +239,43 @@ static void send_cmdline_handler(void* arg) {
  * Generic RPCs
  * ===============================================================================================
  */
+
+
+
+// Get the UMP channel for communication between a specific core and the monitor
+// `direction` determines the message flow:
+//   0 = from the core to the monitor
+//   1 = from the monitor to the core
+struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction) {
+    // Offset to skip bootinfo and select the correct channel
+    const size_t offset = BASE_PAGE_SIZE / 2 + direction * sizeof(struct ump_chan);
+
+    // Access the memory region assigned to the specified core for URPC
+    return (struct ump_chan *)(global_urpc_frames[core_id] + offset);
+}
+
+// Get the UMP channel for communication between the current core and the monitor
+// `direction` determines the message flow:
+//   0 = from the core to the monitor
+//   1 = from the monitor to the core
+struct ump_chan *get_channel_for_current_core(int direction) {
+    // Offset to skip bootinfo and select the correct channel
+    const size_t offset = BASE_PAGE_SIZE / 2 + direction * sizeof(struct ump_chan);
+
+    // Access the shared memory region mapped for the current core and monitor
+    return (struct ump_chan *)(MON_URPC_VBASE + offset);
+}
+
+// reset pointers and zero out a struct ump_chan
+errval_t ump_chan_init(struct ump_chan *chan, size_t base) {
+    chan->base = base;
+    chan->head = 0;
+    chan->tail = 0;
+    chan->size = BASE_PAGE_SIZE;
+    memset((void *)((genvaddr_t)chan + (genvaddr_t)chan->base), 0, BASE_PAGE_SIZE);
+    return SYS_ERR_OK;
+}
+
 /**
  * @brief Send a single number over an RPC channel.
  *

@@ -18,11 +18,21 @@
 
 #include <aos/aos.h>
 
+#define MOD_NAME_MAX_NUM 32
+#define MOD_NAME_LEN 64
 
 /// defines the transport backend of the RPC channel
 enum aos_rpc_transport {
     AOS_RPC_LMP,
     AOS_RPC_UMP,
+};
+
+// circular buffer for UMP messaging in a URPC frame
+struct ump_chan {
+    size_t base;  // offset of base from struct ump_chan
+    size_t head;  // offset of head from base
+    size_t tail;  // offset of tail from base
+    size_t size;  // size of the buffer
 };
 
 
@@ -118,9 +128,9 @@ errval_t aos_rpc_init(struct aos_rpc *rpc);
 
 void initialize_send_handler(void *arg);
 void init_acknowledgment_handler(void *arg);
-
-
-
+struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction);
+struct ump_chan *get_channel_for_current_core(int direction);
+errval_t ump_chan_init(struct ump_chan *chan, size_t base);
 
 /*
  * ------------------------------------------------------------------------------------------------

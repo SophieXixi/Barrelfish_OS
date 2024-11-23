@@ -481,7 +481,7 @@ errval_t coreboot_boot_core(hwid_t mpid, const char *boot_driver, const char *cp
         Need to relocate so they can excute from their designated memory region
      */
     struct mem_info cpu_mi, boot_mi;
-    genvaddr_t cpu_reloc_entry_point, boot_reloc_entry_point;
+    genvaddr_t cpu_reloc_entry_point, boot_reloc_entry_point; // need this in invoke_monitor_spawn_core later
 
     // Load, map, and relocate CPU driver and particularlly relocate to the ARMv8_KERNEL_OFFSET
     // Here, we search the "arch_init" to find the entry point. 
@@ -627,6 +627,7 @@ errval_t coreboot_boot_core(hwid_t mpid, const char *boot_driver, const char *cp
         boot struct as argument.
      */
 
+    // Fix the CPU type to CPU_ARM8
     err = invoke_monitor_spawn_core(coreData->dst_arch_id, CPU_ARM8, boot_reloc_entry_point, coreData_cap.u.frame.base, 0);
 
     // set the return core parameter

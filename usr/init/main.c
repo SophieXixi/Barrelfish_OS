@@ -20,19 +20,25 @@
 #include <aos/paging.h>
 #include <aos/waitset.h>
 #include <aos/aos_rpc.h>
+#include <aos/kernel_cap_invocations.h>
 #include <mm/mm.h>
 #include <grading/grading.h>
 #include <grading/io.h>
 #include <spawn/spawn.h>
+#include <spawn/multiboot.h>
 
-#include "mem_alloc.h"
 #include "coreboot.h"
+#include "mem_alloc.h"
 #include "proc_mgmt.h"
+
+#include <barrelfish_kpi/startup_arm.h>
 
 #include <drivers/lpuart.h>
 #include <drivers/pl011.h>
-#include "proc_mgmt.h"
-#include <proc_mgmt/proc_mgmt.h>
+#include <drivers/gic_dist.h>
+#include <maps/qemu_map.h>
+#include <maps/imx8x_map.h>
+#include <aos/inthandler.h>
 
 bool qemu;
 struct pl011_s *pl011;
@@ -43,6 +49,10 @@ extern void initialize_process_manager(struct process_manager **pm);
 
 struct bootinfo *bi;
 coreid_t my_core_id;
+
+int num_mod_names;
+char mod_names[MOD_NAME_MAX_NUM][MOD_NAME_LEN];
+
 
 struct platform_info platform_info;
 void send_ack_handler(void *arg);
@@ -358,7 +368,10 @@ void gen_recv_handler(void *arg) {
     err = lmp_chan_alloc_recv_slot(rpc->channel);
 }
 
-
+/**
+ *  Entry point for the bootstrap processor (BSP),
+ *  which is the primary processor that initializes the system and brings up the other cores.
+ */
 static int
 bsp_main(int argc, char *argv[]) {
     errval_t err;
@@ -387,18 +400,21 @@ bsp_main(int argc, char *argv[]) {
     // DO NOT REMOVE THE FOLLOWING LINE!
     grading_test_early();
 
-
     switch (platform_info.platform) {
         case PI_PLATFORM_IMX8X: {
             // SPAWN THE SECOND CORE on the IMX8X baord
-            hwid_t mpid = 1;
-            err = coreboot_boot_core(mpid, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
+            // hwid_t mpid = 1;
+            // err = coreboot_boot_core(mpid, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
+            err = coreboot_boot_core(1, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
+            err = coreboot_boot_core(2, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
             break;
         }
         case PI_PLATFORM_QEMU: {
             // SPAWN THE SECOND CORE on QEMU
-            hwid_t mpid = 1;
-            err = coreboot_boot_core(mpid, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
+            // hwid_t mpid = 1;
+            // err = coreboot_boot_core(mpid, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
+            err = coreboot_boot_core(1, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
+            err = coreboot_boot_core(2, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
             break;
         }
         default:
@@ -409,7 +425,17 @@ bsp_main(int argc, char *argv[]) {
         DEBUG_ERR(err, "Booting second core failed. Continuing.\n");
     }
 
-    // TODO: Spawn system processes, boot second core etc. here
+    // Spawn system processes, boot second core etc. here
+    // initialize UMP channels
+    for (int i = 1; i < 4; i++) {
+        genvaddr_t ump_addr = (genvaddr_t)get_channel_for_core_to_monitor(i, 0);
+        ump_chan_init((struct ump_chan *)ump_addr, ROUND_UP(ump_addr, BASE_PAGE_SIZE) - ump_addr);
+        ump_addr = (genvaddr_t)get_channel_for_core_to_monitor(i, 1);
+        ump_chan_init((struct ump_chan *)ump_addr, ROUND_UP(ump_addr, BASE_PAGE_SIZE) - ump_addr + BASE_PAGE_SIZE);
+    }
+
+
+
 
     // calling late grading tests, required functionality up to here:
     //   - full functionality of the system
@@ -427,12 +453,19 @@ bsp_main(int argc, char *argv[]) {
         }
     }
 
+    // spawn the shell
+    domainid_t shell_pid;
+    proc_mgmt_spawn_with_cmdline("shell", 0, &shell_pid);
     
     return main_loop(get_default_waitset());
 
     return EXIT_SUCCESS;
 }
 
+/**
+ * Entry point for secondary cores. 
+ * These cores rely on the BSP for initialization and focus on setting up their local environment for operation
+ */
 static int
 app_main(int argc, char *argv[]) {
     (void)argc;
@@ -442,6 +475,10 @@ app_main(int argc, char *argv[]) {
     // TODO (M5):
     //   - initialize memory allocator etc.
     //   - obtain a pointer to the bootinfo structure on the appcore!
+    err = initialize_ram_alloc(bi);
+    if(err_is_fail(err)){
+        USER_PANIC_ERR(err, "initialize_ram_alloc");
+    }
 
     // initialize the grading/testing subsystem
     // DO NOT REMOVE THE FOLLOWING LINE!
@@ -453,7 +490,7 @@ app_main(int argc, char *argv[]) {
     //   - spawn new processes
     // DO NOT REMOVE THE FOLLOWING LINE!
     grading_test_early();
-
+  
     // TODO (M7)
     //  - initialize subsystems for nameservice, distops, ...
 
@@ -465,6 +502,14 @@ app_main(int argc, char *argv[]) {
     //   - full functionality of the system
     // DO NOT REMOVE THE FOLLOWING LINE!
     grading_test_late();
+    for (int i = 0; i < (int) bi->regions_length; i++) {
+        if (bi->regions[i].mr_type == RegionType_Module) {
+            const char* name = multiboot_module_name(&bi->regions[i]);
+            strncpy(mod_names[num_mod_names], name, MOD_NAME_LEN);
+            // debug_printf("added module: %s\n", mod_names[num_mod_names]);
+            num_mod_names++;
+        }
+    }
 
     // Hang around
     struct waitset *default_ws = get_default_waitset();
