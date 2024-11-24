@@ -27,15 +27,6 @@ enum aos_rpc_transport {
     AOS_RPC_UMP,
 };
 
-// circular buffer for UMP messaging in a URPC frame
-struct ump_chan {
-    size_t base;  // offset of base from struct ump_chan
-    size_t head;  // offset of head from base
-    size_t tail;  // offset of tail from base
-    size_t size;  // size of the buffer
-};
-
-
 /// type of the receive handler function.
 /// depending on your RPC implementation, maybe you want to slightly adapt this
 typedef void (*aos_recv_handler_fn)(void *arg);
@@ -85,9 +76,11 @@ struct aos_rpc_string_payload {
     size_t len;
 };
 
-
+errval_t aos_rpc_init(struct aos_rpc *rpc);
 void setup_receive_handler(struct aos_rpc *rpc);
 void receive_number_handler(void *arg);
+void initialize_send_handler(void *arg);
+void init_acknowledgment_handler(void *arg);
 
 enum msg_type {
     ACK_MSG,
@@ -116,21 +109,38 @@ struct aos_rpc_ram_cap_req_payload {
     size_t alignment;
 };
 
-/**
- * @brief Initialize an aos_rpc struct.
- *
- * @param[in] rpc  The aos_rpc struct to initialize.
- *
- * @returns SYS_ERR_OK on success, or error value on failure
- */
-errval_t aos_rpc_init(struct aos_rpc *rpc);
 
 
-void initialize_send_handler(void *arg);
-void init_acknowledgment_handler(void *arg);
 struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction);
 struct ump_chan *get_channel_for_current_core(int direction);
 errval_t ump_chan_init(struct ump_chan *chan, size_t base);
+errval_t ump_send(struct ump_chan *chan, char *buf, size_t size);
+errval_t ump_receive(struct ump_chan *chan, void *buf);
+
+
+/**
+circular buffer for inter-core communication in a shared memory region
+
+ */
+struct ump_chan {
+    size_t base;  // offset of base from struct ump_chan
+    size_t head;  // offset of head from base
+    size_t tail;  // offset of tail from base
+    size_t size;  // size of the buffer
+};
+
+struct cache_line {
+    char payload[58];
+    uint8_t frag_num;
+    uint8_t total_frags;
+    uint32_t valid;
+};
+
+struct ump_payload {
+    enum msg_type type;
+    coreid_t core;
+    char payload[60 - sizeof(enum msg_type) - sizeof(coreid_t)];
+};
 
 /*
  * ------------------------------------------------------------------------------------------------

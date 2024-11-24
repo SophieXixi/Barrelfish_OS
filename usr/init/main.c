@@ -435,8 +435,6 @@ bsp_main(int argc, char *argv[]) {
     }
 
 
-
-
     // calling late grading tests, required functionality up to here:
     //   - full functionality of the system
     // DO NOT REMOVE THE FOLLOWING LINE!
@@ -451,6 +449,34 @@ bsp_main(int argc, char *argv[]) {
             DEBUG_ERR(err, "in event_dispatch");
             abort();
         }
+
+        // dispatch on URPC
+        genvaddr_t urpc_base = (genvaddr_t) bi;
+        (void)urpc_base;
+
+        // poll for UMP messages
+        for (int i = 1; i < 4; i++) {
+            struct ump_payload payload;
+            err = ump_receive(get_channel_for_core_to_monitor(i, 0), &payload);
+            if (err == SYS_ERR_OK) {
+                switch (payload.type) {
+                    case SPAWN_CMDLINE:
+                        domainid_t pid;
+                        err = proc_mgmt_spawn_with_cmdline(payload.payload, payload.core, &pid);
+                        if (err_is_fail(err)) {
+                            debug_printf("couldn't spawn a process\n");
+                            abort();
+                        }
+                        thread_yield();
+                        break;
+                    default:
+                        debug_printf("received unknown UMP message type\n");
+                }
+            }
+        }
+
+        thread_yield();
+
     }
 
     // spawn the shell

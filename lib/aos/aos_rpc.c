@@ -277,6 +277,69 @@ errval_t ump_chan_init(struct ump_chan *chan, size_t base) {
 }
 
 /**
+ * @brief Sends a message to the UMP (User-level Message Passing) channel.
+ * 
+ * @param channel Pointer to the UMP channel structure.
+ * @param message Pointer to the message buffer to send.
+ * @param message_size Size of the message in bytes (maximum 60 bytes).
+ * 
+ * @return SYS_ERR_OK on success, or an error code on failure.
+ */
+errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) {
+    // Check if the message size is valid
+    if (message_size > 60) {
+        debug_printf("Error: UMP message exceeds the maximum allowed size of 60 bytes\n");
+        return LIB_ERR_UMP_BUFSIZE_INVALID;
+    }
+
+    // Check if the UMP queue has space for the new message
+    if ((channel->head + 1) % BASE_PAGE_SIZE == channel->tail) {
+        debug_printf("Error: UMP queue is full, cannot add new message\n");
+        return LIB_ERR_UMP_CHAN_FULL;
+    }
+
+    // Calculate the address of the next cache line for the message
+    struct cache_line *next_cache_line = 
+        (struct cache_line *)((genvaddr_t)channel + channel->base + channel->head);
+
+    // Clear to make sure there is no leftover data from previous operations.
+    memset((void *)next_cache_line, 0, sizeof(struct cache_line));
+
+    // store the new message in the shared memory region managed by the UMP channel.
+    memcpy((void *)next_cache_line, message, message_size);
+
+    // Mark the cache line as valid
+    next_cache_line->valid = 1;
+
+    // Advance the head to the next position in the circular buffer
+    channel->head = (channel->head + sizeof(struct cache_line)) % BASE_PAGE_SIZE;
+
+    return SYS_ERR_OK;
+}
+
+// receive a message off the ump channel, performing the appropriate action
+errval_t ump_receive(struct ump_chan *chan, void *buf) {
+    // get the current cache line
+    struct cache_line *cl = (struct cache_line *)((genvaddr_t)chan + chan->base + chan->tail);
+
+    // make sure we have a message
+    if (!cl->valid) {
+        return LIB_ERR_NO_UMP_MSG;
+    }
+    
+    // copy out the received message
+    memcpy(buf, cl->payload, sizeof(struct ump_payload));
+
+    // invalidate just for fun
+    memset(cl, 0, sizeof(struct cache_line));
+
+    // advance tail to next available cache line in circular buffer
+    chan->tail = (chan->tail + sizeof(struct cache_line)) % BASE_PAGE_SIZE;
+
+    return SYS_ERR_OK;
+}
+
+/**
  * @brief Send a single number over an RPC channel.
  *
  * @param[in] chan  the RPC channel to use
