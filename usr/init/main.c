@@ -39,6 +39,9 @@
 #include <maps/qemu_map.h>
 #include <maps/imx8x_map.h>
 #include <aos/inthandler.h>
+#include <barrelfish_kpi/startup_arm.h>
+#include <proc_mgmt/proc_mgmt.h>
+#include <aos/caddr.h>
 
 bool qemu;
 struct pl011_s *pl011;
@@ -498,6 +501,66 @@ app_main(int argc, char *argv[]) {
     (void)argv;
 
     errval_t err;
+
+    // Creating the Module Root CNode
+    struct capref module_cnode_cslot = {
+        .cnode = cnode_root,
+        .slot = ROOTCN_SLOT_MODULECN
+    };
+
+    struct cnoderef module_cnode_ref;
+    err = cnode_create_raw(module_cnode_cslot, &module_cnode_ref, ObjType_L2CNode, L2_CNODE_SLOTS);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "failed to create elf module root on new core");
+        abort();
+    }
+
+    // Mapping the URPC Frame
+    void* urpc_buf;
+    err = paging_map_frame_attr(get_current_paging_state(), &urpc_buf, BASE_PAGE_SIZE,
+    cap_urpc, VREGION_FLAGS_READ_WRITE);
+
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "app_main: couldn't map urpc framee");
+        abort();
+    }
+
+    bi = (struct bootinfo*) urpc_buf;          
+
+    // Forge cap to ram
+    struct capref ram_cap = {
+        .cnode = cnode_memory,
+        .slot = 0
+    };
+    err = ram_forge(ram_cap, bi->regions[0].mr_base, bi->regions[0].mr_bytes, my_core_id);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "couldn't get ram from other core");
+        abort();
+    }
+
+    // Forge caps to every module
+    for (int i = 1; i < (int) bi->regions_length; i++) {
+        struct capref module_cap = {
+            .cnode = cnode_module,
+            .slot = bi->regions[i].mrmod_slot,
+        };
+       
+        err = frame_forge(module_cap, bi->regions[i].mr_base, 
+                          ROUND_UP(bi->regions[i].mrmod_size, BASE_PAGE_SIZE), my_core_id);
+        if (err_is_fail(err)) {
+            DEBUG_ERR(err, "couldn't get ram from other core");
+            abort();
+        }                 
+      
+    }
+
+    // Forge cap to module strings
+    genpaddr_t* base = urpc_buf + sizeof(struct bootinfo) + ((bi->regions_length) * sizeof(struct mem_region));
+    gensize_t* bytes = urpc_buf + sizeof(struct bootinfo) + ((bi->regions_length) * sizeof(struct mem_region)) + sizeof(genpaddr_t);
+    err = frame_forge(cap_mmstrings, *base, ROUND_UP(*bytes, BASE_PAGE_SIZE), my_core_id);
+  
+
+                      
     // TODO (M5):
     //   - initialize memory allocator etc.
     //   - obtain a pointer to the bootinfo structure on the appcore!
@@ -538,13 +601,34 @@ app_main(int argc, char *argv[]) {
     }
 
     // Hang around
-    struct waitset *default_ws = get_default_waitset();
+     struct waitset *default_ws = get_default_waitset();
     while (true) {
-        err = event_dispatch(default_ws);
-        if (err_is_fail(err)) {
+        err = event_dispatch_non_block(default_ws);
+
+        if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
             DEBUG_ERR(err, "in event_dispatch");
             abort();
         }
+
+        // check for a UMP message
+        struct ump_payload payload;
+        err = ump_receive(get_channel_for_current_core(1), &payload);
+        if (err == SYS_ERR_OK) {
+            switch (payload.type) {
+                case SPAWN_CMDLINE:
+                    domainid_t pid;
+                    err = proc_mgmt_spawn_with_cmdline(payload.payload, disp_get_core_id(), &pid);
+                    if (err_is_fail(err)) {
+                        debug_printf("couldn't spawn a process\n");
+                        abort();
+                    }
+                    thread_yield();
+                    break;
+                default:
+                    debug_printf("received unknown UMP message type\n");
+            }
+        }
+        thread_yield();
     }
 
     return EXIT_SUCCESS;

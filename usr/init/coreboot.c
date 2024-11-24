@@ -253,6 +253,7 @@ static errval_t allocate_and_retype_kcb(struct capref *kcb_capref, struct capabi
         return err;
     }
 
+    debug_printf("retype ram to kvb\n");
     // Step 3: Retype the allocated RAM capability into a KCB capability
     err = cap_retype(*kcb_capref, kcb_ram_capref, 0, ObjType_KernelControlBlock, OBJSIZE_KCB);
     if (err_is_fail(err)) {
@@ -261,7 +262,7 @@ static errval_t allocate_and_retype_kcb(struct capref *kcb_capref, struct capabi
     }
 
     // Debug output for the KCB's base address and size
-    debug_printf("KCB base: %p, size: %lu\n", kcb_ram_capability->u.ram.base, kcb_ram_capability->u.ram.bytes);
+    debug_printf("KCB base!!!: %p, size: %lu\n", kcb_ram_capability->u.ram.base, kcb_ram_capability->u.ram.bytes);
 
     return SYS_ERR_OK;
 }

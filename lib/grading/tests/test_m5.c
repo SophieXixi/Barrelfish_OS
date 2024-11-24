@@ -70,6 +70,7 @@ errval_t grading_run_tests_multicore(void)
 
     spawn_one_without_args();
 
+
     grading_printf("#################################################\n");
     grading_printf("# DONE:  Milestone 5 (Multicore)                 \n");
     grading_printf("#################################################\n");

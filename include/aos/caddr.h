@@ -134,7 +134,7 @@ STATIC_ASSERT_SIZEOF(struct capref, 16);
 /* well-known capabilities */
 extern struct capref cap_root, cap_monitorep, cap_irq, cap_io, cap_dispatcher, cap_selfep,
     cap_kernel, cap_initep, cap_perfmon, cap_dispframe, cap_ipi, cap_vroot, cap_argcn, cap_bootinfo,
-    cap_mmstrings;
+    cap_mmstrings, cap_urpc;
 
 
 /**
