@@ -268,8 +268,10 @@ static void send_spawn_with_caps_handler(void * arg) {
 // Get the UMP channel for communication between a specific core and the monitor
 // `direction` determines the message flow:
 // Used by the BSP to get the channel for a specific AP.
-// direction = 0: Core-to-Monitor channel.
-// direction = 1: Monitor-to-Core channel.
+// direction = 0: Core-to-Monitor channel. 
+// A core can notify the monitor to spawn a process, request a resource, or signal an event.
+
+// direction = 1: Monitor-to-Core channel. 
 struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction) {
     // Offset to skip bootinfo and select the correct channel
     const size_t offset = BASE_PAGE_SIZE / 2 + direction * sizeof(struct ump_chan);
@@ -323,7 +325,7 @@ errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) 
         return LIB_ERR_UMP_CHAN_FULL;
     }
 
-    // Calculate the address of the next cache line for the message
+    // calculates the address of the next slot where a message will be written.
     struct cache_line *next_cache_line = 
         (struct cache_line *)((genvaddr_t)channel + channel->base + channel->head);
 
@@ -337,6 +339,7 @@ errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) 
     next_cache_line->valid = 1;
 
     // Advance the head to the next position in the circular buffer
+    // Ddding sizeof(struct cache_line), the head is moved to the next slot in the buffer, where the next message will be written.
     channel->head = (channel->head + sizeof(struct cache_line)) % BASE_PAGE_SIZE;
 
     return SYS_ERR_OK;
@@ -355,7 +358,7 @@ errval_t ump_receive(struct ump_chan *chan, void *buf) {
     // copy out the received message
     memcpy(buf, cl->payload, sizeof(struct ump_payload));
 
-    // invalidate just for fun
+    // invalidate
     memset(cl, 0, sizeof(struct cache_line));
 
     // advance tail to next available cache line in circular buffer
@@ -589,7 +592,7 @@ errval_t aos_rpc_proc_spawn_with_caps(struct aos_rpc *rpc, int argc, const char 
 {
     errval_t err;
     debug_printf("Got in the aos_rpc_proc_spawn_with_cap function \n");
-    
+
     // Log all arguments for debugging
     for (int i = 0; i < argc; i++) {
         debug_printf("arg %d: %s\n", i, argv[i]);

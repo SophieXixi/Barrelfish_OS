@@ -65,6 +65,7 @@ errval_t grading_run_tests_urpc(void)
 
     spawn_one_without_args(0);
     spawn_one_without_args(1);
+    spawn_one_without_args(3);
 
     grading_printf("#################################################\n");
     grading_printf("# DONE:  Milestone 6 (URPC)                      \n");

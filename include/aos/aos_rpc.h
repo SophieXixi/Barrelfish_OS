@@ -126,6 +126,8 @@ This is managed by the sender.
 
 tail pointer: Tracks the position where the next read operation (e.g., receive) will occur.
 This is managed by the receiver.
+
+This is an array of cache linze-sized slots
  */
 struct ump_chan {
     size_t base;  // offset of base from struct ump_chan
@@ -134,6 +136,9 @@ struct ump_chan {
     size_t size;  // size of the buffer
 };
 
+/**
+ * Each 'slot' in the circular buffer corresponds to a struct cache_line
+ */
 struct cache_line {
     char payload[58];
     uint8_t frag_num;

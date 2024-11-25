@@ -494,12 +494,14 @@ bsp_main(int argc, char *argv[]) {
         genvaddr_t urpc_base = (genvaddr_t) bi;
         (void)urpc_base;
 
-        // The BSP monitors incoming UMP messages from other cores.
-        // i = 1 to 3 is all cores it is monitoring
+    // The BSP monitors incoming UMP messages from other cores.
+    // i = 1 to 3 is all cores it is monitoring
      for (int i = 1; i < 4; i++) {
         debug_printf("Checking for UMP messages from core %d\n", i);
 
         struct ump_payload payload;
+
+        // cpre to monitor
         err = ump_receive(get_channel_for_core_to_monitor(i, 0), &payload);
 
         if (err == SYS_ERR_OK) {
@@ -569,6 +571,7 @@ app_main(int argc, char *argv[]) {
     /**
      * The primary core (BSP) prepares the modules and their associated memory regions. 
      * To make these available to the secondary cores, a dedicated CNode is created to store capabilities pointing to the modules.
+     * Secondary core may need to load and execute modules (like the init process or other binaries) as part of its startup
      */
     struct cnoderef module_cnode_ref;
     err = cnode_create_raw(module_cnode_cslot, &module_cnode_ref, ObjType_L2CNode, L2_CNODE_SLOTS);
@@ -590,11 +593,25 @@ app_main(int argc, char *argv[]) {
     // bootinfo is stored in the URPC frame, need this for General system metadata needed during initialization.
     bi = (struct bootinfo*) urpc_buf;          
 
-    // Forge cap to ram for secondary core 
+    /**
+     * The BSP core defines and sets up memory regions for all cores using the bootinfo structure. 
+     * These regions are distributed to secondary cores via capability forgeries.
+     * 
+     *  ram_forge assigns a physical base address (mr_base) and a size (mr_bytes) of memory to the secondary core, extracted from the bootinfo structure.
+        Each secondary core thus knows which part of memory it owns, as the BSP core allocates and shares memory capabilities for individual cores.
+
+        It assigns ownership of this memory region to the secondary core so that it can use the RAM for its own processes and data
+     * 
+     */
     struct capref ram_cap = {
         .cnode = cnode_memory,
         .slot = 0
     };
+
+    /**
+     * forges a capability for each module (e.g., ELF binaries or data segments) listed in the bootinfo. 
+     * It allows the secondary core to access these modules for loading or execution.
+     */
     err = ram_forge(ram_cap, bi->regions[0].mr_base, bi->regions[0].mr_bytes, my_core_id);
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "couldn't get ram from other core");
@@ -602,6 +619,10 @@ app_main(int argc, char *argv[]) {
     }
 
     // Forge caps to every module
+    /**
+     * forges a capability for each module (e.g., ELF binaries or data segments) listed in the bootinfo. 
+     * It allows the secondary core to access these modules for loading or execution.
+     */
     for (int i = 1; i < (int) bi->regions_length; i++) {
         struct capref module_cap = {
             .cnode = cnode_module,
@@ -618,6 +639,10 @@ app_main(int argc, char *argv[]) {
     }
 
     // Forge cap to module strings, so secondary cores can retrieve and use the module strings.
+    /** 
+     * module strings contain metadata about ELF binaries (e.g., names, paths, and descriptions).
+     * These are required by secondary cores (APs) to locate, load, and execute modules such as the init process.
+     */
     genpaddr_t* base = urpc_buf + sizeof(struct bootinfo) + ((bi->regions_length) * sizeof(struct mem_region));
     gensize_t* bytes = urpc_buf + sizeof(struct bootinfo) + ((bi->regions_length) * sizeof(struct mem_region)) + sizeof(genpaddr_t);
     err = frame_forge(cap_mmstrings, *base, ROUND_UP(*bytes, BASE_PAGE_SIZE), my_core_id);
@@ -663,8 +688,7 @@ app_main(int argc, char *argv[]) {
         }
     }
 
-    // Hang around
-     struct waitset *default_ws = get_default_waitset();
+    struct waitset *default_ws = get_default_waitset();
     while (true) {
         err = event_dispatch_non_block(default_ws);
 
