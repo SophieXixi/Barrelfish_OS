@@ -360,6 +360,29 @@ void gen_recv_handler(void *arg) {
                 return;
             }
             break;
+        case SPAWN_WITH_CAPS_MSG:
+            // debug_printf("is spawn with caps message\n");
+        
+            void *buf14;
+            err = paging_map_frame_attr(get_current_paging_state(), &buf14, msg.words[1], remote_cap, VREGION_FLAGS_READ_WRITE);
+            struct spawn_with_caps_frame_input * input = (struct spawn_with_caps_frame_input*) buf14;
+            char ** argv = malloc(4096);
+            for (int i = 0; i < input->argc; i++) {
+                argv[i] = malloc(strlen(input->argv[i] + 1));
+                strcpy(argv[i], input->argv[i]);
+            }
+            domainid_t pid4;
+            err = proc_mgmt_spawn_with_caps(input->argc, (const char **) argv, input->capc, &input->cap, input->core, &pid4);
+            (input->pid) = pid4;
+            if (err_is_fail(err)) {
+                debug_printf("spawn with caps failed\n");
+            }
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "registering send handler\n");
+                return;
+            }
+            break;
 
         default:
             debug_printf("received unknown message type\n");
@@ -374,9 +397,15 @@ void gen_recv_handler(void *arg) {
 /**
  *  Entry point for the bootstrap processor (BSP),
  *  which is the primary processor that initializes the system and brings up the other cores.
+ *  1. Initializing system resources (e.g., memory, UMP channels, and process manager).
+    2. Spawning and booting other cores (APs).
+    3. Acting as a monitor for inter-core communication.
+
+    centralized manager
  */
 static int
 bsp_main(int argc, char *argv[]) {
+    debug_printf("In the bsp_main\n");
     errval_t err;
     initialize_process_manager(&proc_manager);
 
@@ -403,6 +432,7 @@ bsp_main(int argc, char *argv[]) {
     // DO NOT REMOVE THE FOLLOWING LINE!
     grading_test_early();
 
+    debug_printf("start other cores\n");
     switch (platform_info.platform) {
         case PI_PLATFORM_IMX8X: {
             // SPAWN THE SECOND CORE on the IMX8X baord
@@ -410,6 +440,7 @@ bsp_main(int argc, char *argv[]) {
             // err = coreboot_boot_core(mpid, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
             err = coreboot_boot_core(1, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
             err = coreboot_boot_core(2, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
+            err = coreboot_boot_core(3, "boot_armv8_generic", "cpu_imx8x", "init", NULL);
             break;
         }
         case PI_PLATFORM_QEMU: {
@@ -418,6 +449,7 @@ bsp_main(int argc, char *argv[]) {
             // err = coreboot_boot_core(mpid, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
             err = coreboot_boot_core(1, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
             err = coreboot_boot_core(2, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
+            err = coreboot_boot_core(3, "boot_armv8_generic", "cpu_a57_qemu", "init", NULL);
             break;
         }
         default:
@@ -427,6 +459,8 @@ bsp_main(int argc, char *argv[]) {
     if (err_is_fail(err)) {
         DEBUG_ERR(err, "Booting second core failed. Continuing.\n");
     }
+
+    debug_printf("Prepare to set up the UMP channel\n");
 
     // Spawn system processes, boot second core etc. here
     // initialize UMP channels
@@ -444,9 +478,12 @@ bsp_main(int argc, char *argv[]) {
     grading_test_late();
 
     debug_printf("Message handler loop\n");
-    // Hang around
+
+
+    // BSP continuously handles events registered with its waitset
     struct waitset *default_ws = get_default_waitset();
     while (true) {
+        debug_printf("get into the loop\n");
         err = event_dispatch(default_ws);
         if (err_is_fail(err)) {
             DEBUG_ERR(err, "in event_dispatch");
@@ -457,26 +494,44 @@ bsp_main(int argc, char *argv[]) {
         genvaddr_t urpc_base = (genvaddr_t) bi;
         (void)urpc_base;
 
-        // poll for UMP messages
-        for (int i = 1; i < 4; i++) {
-            struct ump_payload payload;
-            err = ump_receive(get_channel_for_core_to_monitor(i, 0), &payload);
-            if (err == SYS_ERR_OK) {
-                switch (payload.type) {
-                    case SPAWN_CMDLINE:
-                        domainid_t pid;
-                        err = proc_mgmt_spawn_with_cmdline(payload.payload, payload.core, &pid);
-                        if (err_is_fail(err)) {
-                            debug_printf("couldn't spawn a process\n");
-                            abort();
-                        }
-                        thread_yield();
-                        break;
-                    default:
-                        debug_printf("received unknown UMP message type\n");
-                }
+        // The BSP monitors incoming UMP messages from other cores.
+        // i = 1 to 3 is all cores it is monitoring
+     for (int i = 1; i < 4; i++) {
+        debug_printf("Checking for UMP messages from core %d\n", i);
+
+        struct ump_payload payload;
+        err = ump_receive(get_channel_for_core_to_monitor(i, 0), &payload);
+
+        if (err == SYS_ERR_OK) {
+            debug_printf("UMP message received from core %d\n", i);
+            debug_printf("Message type: %d, Core: %d\n", payload.type, payload.core);
+
+            switch (payload.type) {
+                case SPAWN_CMDLINE:
+                    debug_printf("Message type: SPAWN_CMDLINE from core %d\n", i);
+                    domainid_t pid;
+                    debug_printf("Attempting to spawn a new process with payload: '%s'\n", payload.payload);
+
+                    err = proc_mgmt_spawn_with_cmdline(payload.payload, payload.core, &pid);
+                    if (err_is_fail(err)) {
+                        debug_printf("Failed to spawn process on core %d with error: %s\n", payload.core, err_getstring(err));
+                        abort();
+                    }
+
+                    debug_printf("Successfully spawned a process with PID %d on core %d\n", pid, payload.core);
+                    thread_yield();  // Allow other threads to execute
+                    break;
+
+                default:
+                    debug_printf("Received unknown UMP message type: %d from core %d\n", payload.type, i);
             }
+        } else if (err != SYS_ERR_OK) {
+            debug_printf("No valid UMP message received from core %d. Error: %s\n", i, err_getstring(err));
+        } else {
+            debug_printf("No new messages from core %d during this iteration.\n", i);
         }
+    }
+
 
         thread_yield();
 
@@ -485,7 +540,7 @@ bsp_main(int argc, char *argv[]) {
     // spawn the shell
     domainid_t shell_pid;
     proc_mgmt_spawn_with_cmdline("shell", 0, &shell_pid);
-    
+
     return main_loop(get_default_waitset());
 
     return EXIT_SUCCESS;
@@ -494,6 +549,9 @@ bsp_main(int argc, char *argv[]) {
 /**
  * Entry point for secondary cores. 
  * These cores rely on the BSP for initialization and focus on setting up their local environment for operation
+ * 
+ *  Application-specific tasks and rely on the BSP for high-level management
+ *  APs handle distributed workloads
  */
 static int
 app_main(int argc, char *argv[]) {
@@ -508,6 +566,10 @@ app_main(int argc, char *argv[]) {
         .slot = ROOTCN_SLOT_MODULECN
     };
 
+    /**
+     * The primary core (BSP) prepares the modules and their associated memory regions. 
+     * To make these available to the secondary cores, a dedicated CNode is created to store capabilities pointing to the modules.
+     */
     struct cnoderef module_cnode_ref;
     err = cnode_create_raw(module_cnode_cslot, &module_cnode_ref, ObjType_L2CNode, L2_CNODE_SLOTS);
     if (err_is_fail(err)) {
@@ -516,7 +578,7 @@ app_main(int argc, char *argv[]) {
     }
 
     // Mapping the URPC Frame
-    void* urpc_buf;
+    void* urpc_buf; // The shared memory region is used for inter-core communication using URPC 
     err = paging_map_frame_attr(get_current_paging_state(), &urpc_buf, BASE_PAGE_SIZE,
     cap_urpc, VREGION_FLAGS_READ_WRITE);
 
@@ -525,9 +587,10 @@ app_main(int argc, char *argv[]) {
         abort();
     }
 
+    // bootinfo is stored in the URPC frame, need this for General system metadata needed during initialization.
     bi = (struct bootinfo*) urpc_buf;          
 
-    // Forge cap to ram
+    // Forge cap to ram for secondary core 
     struct capref ram_cap = {
         .cnode = cnode_memory,
         .slot = 0
@@ -554,7 +617,7 @@ app_main(int argc, char *argv[]) {
       
     }
 
-    // Forge cap to module strings
+    // Forge cap to module strings, so secondary cores can retrieve and use the module strings.
     genpaddr_t* base = urpc_buf + sizeof(struct bootinfo) + ((bi->regions_length) * sizeof(struct mem_region));
     gensize_t* bytes = urpc_buf + sizeof(struct bootinfo) + ((bi->regions_length) * sizeof(struct mem_region)) + sizeof(genpaddr_t);
     err = frame_forge(cap_mmstrings, *base, ROUND_UP(*bytes, BASE_PAGE_SIZE), my_core_id);
@@ -622,13 +685,16 @@ app_main(int argc, char *argv[]) {
                         debug_printf("couldn't spawn a process\n");
                         abort();
                     }
+                    debug_printf("succrssfully spawn a process in app_main\n");
                     thread_yield();
                     break;
                 default:
                     debug_printf("received unknown UMP message type\n");
             }
         }
+
         thread_yield();
+
     }
 
     return EXIT_SUCCESS;

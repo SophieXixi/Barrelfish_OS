@@ -17,6 +17,9 @@
 #include <barrelfish_kpi/startup_arm.h>
 
 
+#include <proc_mgmt/proc_mgmt.h>
+
+
 genvaddr_t global_urpc_frames[4];
 
 struct aos_rpc *global_rpc;
@@ -233,6 +236,26 @@ static void send_cmdline_handler(void* arg) {
     debug_printf("cmdline sent!\n");
 }
 
+static void send_spawn_with_caps_handler(void * arg) {
+    // debug_printf("got into spawn with caps request send handler\n");
+    
+    errval_t err;
+
+    // unpack the provided string and length
+    struct aos_rpc_string_payload *payload = (struct aos_rpc_string_payload *) arg;
+    struct aos_rpc *rpc = payload->rpc;
+    struct capref frame = payload->frame;
+    size_t len = payload->len;
+    struct lmp_chan *lc = rpc->channel;
+
+    err = lmp_chan_send2(lc, 0, frame, SPAWN_WITH_CAPS_MSG, len);
+    while (err_is_fail(err)) {
+        DEBUG_ERR(err, "sending spawn with caps request in handler\n");
+        abort();
+    }
+
+    // debug_printf("spawn with caps request sent!\n");
+}
 
 /*
  * ===============================================================================================
@@ -244,8 +267,9 @@ static void send_cmdline_handler(void* arg) {
 
 // Get the UMP channel for communication between a specific core and the monitor
 // `direction` determines the message flow:
-//   0 = from the core to the monitor
-//   1 = from the monitor to the core
+// Used by the BSP to get the channel for a specific AP.
+// direction = 0: Core-to-Monitor channel.
+// direction = 1: Monitor-to-Core channel.
 struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction) {
     // Offset to skip bootinfo and select the correct channel
     const size_t offset = BASE_PAGE_SIZE / 2 + direction * sizeof(struct ump_chan);
@@ -256,8 +280,9 @@ struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction
 
 // Get the UMP channel for communication between the current core and the monitor
 // `direction` determines the message flow:
-//   0 = from the core to the monitor
-//   1 = from the monitor to the core
+// Used by an AP to get its communication channel with the BSP.
+// direction = 0: Core-to-Monitor channel.
+// direction = 1: Monitor-to-Core channel.
 struct ump_chan *get_channel_for_current_core(int direction) {
     // Offset to skip bootinfo and select the correct channel
     const size_t offset = BASE_PAGE_SIZE / 2 + direction * sizeof(struct ump_chan);
@@ -305,7 +330,7 @@ errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) 
     // Clear to make sure there is no leftover data from previous operations.
     memset((void *)next_cache_line, 0, sizeof(struct cache_line));
 
-    // store the new message in the shared memory region managed by the UMP channel.
+    // Copy the new message into the calculated location in the circular buffer. 
     memcpy((void *)next_cache_line, message, message_size);
 
     // Mark the cache line as valid
@@ -335,6 +360,8 @@ errval_t ump_receive(struct ump_chan *chan, void *buf) {
 
     // advance tail to next available cache line in circular buffer
     chan->tail = (chan->tail + sizeof(struct cache_line)) % BASE_PAGE_SIZE;
+
+    debug_printf("We received something on core %d\n", disp_get_core_id());
 
     return SYS_ERR_OK;
 }
@@ -557,22 +584,86 @@ errval_t aos_rpc_serial_putchar(struct aos_rpc *rpc, char c)
  * Hint: we should be able to send multiple capabilities, but we can only send one.
  *       Think how you could send multiple cappabilities by just sending one.
  */
-errval_t aos_rpc_proc_spawn_with_caps(struct aos_rpc *chan, int argc, const char *argv[], int capc,
+errval_t aos_rpc_proc_spawn_with_caps(struct aos_rpc *rpc, int argc, const char *argv[], int capc,
                                       struct capref cap, coreid_t core, domainid_t *newpid)
 {
-    // make compiler happy about unused parameters
-    (void)chan;
-    (void)argc;
-    (void)argv;
-    (void)capc;
-    (void)cap;
-    (void)core;
-    (void)newpid;
+    errval_t err;
+    debug_printf("Got in the aos_rpc_proc_spawn_with_cap function \n");
+    
+    // Log all arguments for debugging
+    for (int i = 0; i < argc; i++) {
+        debug_printf("arg %d: %s\n", i, argv[i]);
+    }
 
-    // TODO: implement the process spawn with caps RPC
-    DEBUG_ERR(LIB_ERR_NOT_IMPLEMENTED, "%s not implemented", __FUNCTION__);
-    return LIB_ERR_NOT_IMPLEMENTED;
+    // Step 1: Allocate a frame to hold arguments
+    struct capref frame;
+    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to allocate frame for arguments");
+        return err_push(err, LIB_ERR_FRAME_ALLOC);
+    }
+
+    // Step 2: Map the allocated frame into virtual memory
+    void *buf;
+    err = paging_map_frame_attr(get_current_paging_state(), &buf, BASE_PAGE_SIZE, frame, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to map frame");
+    }
+
+    // Step 3: Prepare the input structure within the allocated frame
+    struct spawn_with_caps_frame_input *input = (struct spawn_with_caps_frame_input *)buf;
+    input->argc = argc;
+    for (int i = 0; i < argc; i++) {
+        strcpy(input->argv[i], argv[i]);  // Copy each argument to the input frame
+    }
+    input->capc = capc;
+    input->cap = cap;
+    input->core = core;
+
+    // Step 4: Allocate a receive slot on the LMP channel
+    struct lmp_chan *lc = rpc->channel;
+    err = lmp_chan_alloc_recv_slot(lc);
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to allocate receive slot on LMP channel");
+        return err_push(err, LIB_ERR_LMP_ALLOC_RECV_SLOT);
+    }
+
+    // Step 5: Send the frame capability and length via the LMP channel
+    struct aos_rpc_string_payload *payload = malloc(sizeof(struct aos_rpc_string_payload));
+    if (!payload) {
+        DEBUG_ERR(LIB_ERR_MALLOC_FAIL, "Failed to allocate memory for string payload");
+        return LIB_ERR_MALLOC_FAIL;
+    }
+
+    payload->rpc = rpc;
+    payload->frame = frame;
+    payload->len = BASE_PAGE_SIZE;
+
+    // Register the send handler and dispatch the event
+    err = lmp_chan_register_send(lc, get_default_waitset(), MKCLOSURE(send_spawn_with_caps_handler, (void *)payload));
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Failed to register send handler");
+        free(payload);
+    }
+
+    // Dispatch the waitset to process the event
+    err = event_dispatch(get_default_waitset());
+    if (err_is_fail(err)) {
+        DEBUG_ERR(err, "Event dispatch failed");
+        free(payload);
+        return err_push(err, LIB_ERR_EVENT_DISPATCH);
+    }
+
+    // Step 6: Retrieve the PID of the spawned process
+    *newpid = input->pid;
+    debug_printf("PID of the new process: %d\n", input->pid);
+
+    // Free the allocated payload
+    free(payload);
+
+    return SYS_ERR_OK;
 }
+
 
 /**
  * @brief requests a new process to be spawned with the supplied commandline

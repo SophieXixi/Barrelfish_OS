@@ -448,7 +448,7 @@ errval_t check_for_event(struct waitset *ws)
 
 errval_t event_dispatch(struct waitset *ws)
 {
-    //debug_printf("entering event_dispatch\n");
+    debug_printf("entering event_dispatch\n");
     struct event_closure closure;
     errval_t err = get_next_event(ws, &closure);
     if (err_is_fail(err)) {

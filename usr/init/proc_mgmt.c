@@ -263,6 +263,10 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
         debug_printf("Spawning on core %d from core %d\n", core, my_core_id);
 
         // Select appropriate UMP channel for inter-core communication
+        /**
+         *  get_channel_for_core_to_monitor(core, 1) gets the monitor-to-core channel (used by the BSP).
+            get_channel_for_current_core(0) gets the current-core-to-monitor channel (used by application cores).
+         */
         struct ump_chan *uchan = (my_core_id == 0) ? get_channel_for_core_to_monitor(core, 1) : get_channel_for_current_core(0);
 
         // Construct UMP payload message

@@ -121,6 +121,11 @@ errval_t ump_receive(struct ump_chan *chan, void *buf);
 /**
 circular buffer for inter-core communication in a shared memory region
 
+head pointer: Tracks the position where the next write operation (e.g., send) will occur. 
+This is managed by the sender.
+
+tail pointer: Tracks the position where the next read operation (e.g., receive) will occur.
+This is managed by the receiver.
  */
 struct ump_chan {
     size_t base;  // offset of base from struct ump_chan
@@ -140,6 +145,15 @@ struct ump_payload {
     enum msg_type type;
     coreid_t core;
     char payload[60 - sizeof(enum msg_type) - sizeof(coreid_t)];
+};
+
+struct spawn_with_caps_frame_input {
+    int argc;
+    char argv[8][8];
+    int capc;
+    struct capref cap;
+    coreid_t core;
+    domainid_t pid;
 };
 
 /*
