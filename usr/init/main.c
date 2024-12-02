@@ -50,6 +50,8 @@ struct lpuart_s *lpuart;
 extern struct process_manager *proc_manager;
 extern void initialize_process_manager(struct process_manager **pm);
 
+//void* urpc_buf;
+
 struct bootinfo *bi;
 coreid_t my_core_id;
 
@@ -581,7 +583,7 @@ app_main(int argc, char *argv[]) {
     }
 
     // Mapping the URPC Frame
-    void* urpc_buf; // The shared memory region is used for inter-core communication using URPC 
+    void *urpc_buf; // The shared memory region is used for inter-core communication using URPC 
     err = paging_map_frame_attr(get_current_paging_state(), &urpc_buf, BASE_PAGE_SIZE,
     cap_urpc, VREGION_FLAGS_READ_WRITE);
 
@@ -699,7 +701,7 @@ app_main(int argc, char *argv[]) {
 
         // check for a UMP message
         struct ump_payload payload;
-        err = ump_receive(get_channel_for_current_core(1), &payload);
+        err = ump_receive(get_channel_for_current_core(0), &payload);
         if (err == SYS_ERR_OK) {
             switch (payload.type) {
                 case SPAWN_CMDLINE:

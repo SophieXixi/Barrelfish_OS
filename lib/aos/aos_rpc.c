@@ -19,6 +19,7 @@
 
 #include <proc_mgmt/proc_mgmt.h>
 
+//extern void* urpc_buf;
 
 genvaddr_t global_urpc_frames[4];
 
@@ -286,8 +287,10 @@ struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction
 // direction = 0: Core-to-Monitor channel.
 // direction = 1: Monitor-to-Core channel.
 struct ump_chan *get_channel_for_current_core(int direction) {
+    //(void) direction;
     // Offset to skip bootinfo and select the correct channel
     const size_t offset = BASE_PAGE_SIZE / 2 + direction * sizeof(struct ump_chan);
+    //const size_t offset = BASE_PAGE_SIZE / 2;
 
     // Access the shared memory region mapped for the current core and monitor
     return (struct ump_chan *)(MON_URPC_VBASE + offset);

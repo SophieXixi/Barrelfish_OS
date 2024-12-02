@@ -39,6 +39,7 @@ static void spawn_one_without_args(coreid_t core)
 {
     errval_t err;
 
+    debug_printf("spawn process to core: %d, from core: %d\n", core, disp_get_core_id());
     grading_printf("spawn_one_without_args(%s, %d)\n", BINARY_NAME, core);
 
     domainid_t pid;
