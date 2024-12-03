@@ -202,7 +202,7 @@ static void morecore_free(void *base, size_t bytes)
     }
 
     // Add the freed memory back to the free list
-    err = add_to_free_list(get_current_paging_state(), (lvaddr_t)base, bytes);
+    //err = add_to_free_list(get_current_paging_state(), (lvaddr_t)base, bytes);
     if (err_is_fail(err)) {
         USER_PANIC("Failed to add freed region back to free list\n");
         return;

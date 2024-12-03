@@ -300,64 +300,121 @@ errval_t paging_alloc(struct paging_state *st, void **buf, size_t bytes, size_t 
      */
     
     // printf("Invoke the paging_alloc function\n");
-    size_t aligned_bytes = ROUND_UP(bytes, alignment);
+    //size_t aligned_bytes = ROUND_UP(bytes, alignment);
 
     // Try to find a suitable free region
-    struct paging_region *prev = NULL;
-    struct paging_region *freeList = st->free_list;
-    while (freeList != NULL) {
-        if (freeList->region_size >= aligned_bytes) { // Found a suitable region
-            *buf = (void *)freeList->base_addr;
+    // struct paging_region *prev = NULL;
+    // struct paging_region *freeList = st->free_list;
+    // while (freeList != NULL) {
+    //     if (freeList->region_size >= aligned_bytes) { // Found a suitable region
+    //         *buf = (void *)freeList->base_addr;
 
-            // Adjust the free list entry
-            if (freeList->region_size == aligned_bytes) {
-                // Exact match, remove the current region from the list
-                if (prev == NULL) {
-                    st->free_list = freeList->next;
-                } else {
-                    prev->next = freeList->next;
-                }
-                slab_free(&st->slab_allocator, freeList);
-            } else {
-                // Partial allocation, update the base address and size
-                freeList->base_addr += aligned_bytes;
-                freeList->region_size -= aligned_bytes;
-            }
-            return SYS_ERR_OK;
+    //         // Adjust the free list entry
+    //         if (freeList->region_size == aligned_bytes) {
+    //             // Exact match, remove the current region from the list
+    //             if (prev == NULL) {
+    //                 st->free_list = freeList->next;
+    //             } else {
+    //                 prev->next = freeList->next;
+    //             }
+    //             slab_free(&st->slab_allocator, freeList);
+    //         } else {
+    //             // Partial allocation, update the base address and size
+    //             freeList->base_addr += aligned_bytes;
+    //             freeList->region_size -= aligned_bytes;
+    //         }
+    //         return SYS_ERR_OK;
+    //     }
+    //     prev = freeList;
+    //     freeList = freeList->next;
+    // }
+
+    
+    // Align the requested size
+    size_t aligned_bytes = ROUND_UP(bytes, alignment);
+
+    // Start the search from the current virtual address
+    genvaddr_t vaddr = st->current_vaddr;
+    size_t space = 0;
+
+    // Extract the indices for page table levels
+    genvaddr_t currentL0 = VMSAv8_64_L0_INDEX(vaddr);
+    genvaddr_t currentL1 = VMSAv8_64_L1_INDEX(vaddr);
+    genvaddr_t currentL2 = VMSAv8_64_L2_INDEX(vaddr);
+    genvaddr_t currentL3 = VMSAv8_64_L3_INDEX(vaddr);
+
+    bool resetVaddr = false;
+
+    // Find a contiguous free region large enough for `aligned_bytes`
+    while (space < aligned_bytes) {
+        if (st->root->children[currentL0] == NULL ||
+            st->root->children[currentL0]->children[currentL1] == NULL ||
+            st->root->children[currentL0]->children[currentL1]->children[currentL2] == NULL ||
+            st->root->children[currentL0]->children[currentL1]->children[currentL2]->children[currentL3] == NULL) {
+            
+            // Increment space by the page size
+            space += BASE_PAGE_SIZE;
+        } else {
+            // Conflict: Reset search
+            resetVaddr = true;
         }
-        prev = freeList;
-        freeList = freeList->next;
+
+        // Move to the next L3 slot
+        currentL3++;
+        if (currentL3 >= NUM_PT_SLOTS) {
+            currentL3 = 0;
+            currentL2++;
+        }
+        if (currentL2 >= NUM_PT_SLOTS) {
+            currentL2 = 0;
+            currentL1++;
+        }
+        if (currentL1 >= NUM_PT_SLOTS) {
+            currentL1 = 0;
+            currentL0++;
+        }
+        if (currentL0 >= NUM_PT_SLOTS) {
+            // If all slots are exhausted, wrap around
+            vaddr = st->start_vaddr;
+            currentL0 = VMSAv8_64_L0_INDEX(vaddr);
+            currentL1 = VMSAv8_64_L1_INDEX(vaddr);
+            currentL2 = VMSAv8_64_L2_INDEX(vaddr);
+            currentL3 = VMSAv8_64_L3_INDEX(vaddr);
+            resetVaddr = false;
+            space = 0; // Reset space
+        }
+
+        if (resetVaddr) {
+            // Recalculate the virtual address and reset space
+            resetVaddr = false;
+            vaddr = VADDR_CALCULATE(currentL0, currentL1, currentL2, currentL3, 0);
+            space = 0;
+        }
     }
 
+    // Allocate the region starting at the calculated `vaddr`
+    *buf = (void *)vaddr;
 
-    genvaddr_t vaddr = st->current_vaddr;
+    // Update `st->current_vaddr` to move forward
+    st->current_vaddr = ROUND_UP(vaddr + aligned_bytes, BASE_PAGE_SIZE);
 
-    // Reserve the virtual address space by incrementing current_vaddr
-    st->current_vaddr += aligned_bytes;
-
-    // Track the lazily allocated region in the paging_state's region list
+    // Track the lazily allocated region in the paging state's region list
     struct paging_region *new_region = slab_alloc(&st->slab_allocator);
     if (new_region == NULL) {
         return LIB_ERR_SLAB_ALLOC_FAIL;
     }
 
     // Initialize the lazily allocated region
-    new_region->base_addr = vaddr;         // Start of the reserved virtual address range
-    new_region->region_size = aligned_bytes; // Size of the allocated virtual memory region
-    new_region->flags = VREGION_FLAGS_READ_WRITE; // Default permissions (adjust if needed)
-    new_region->type = PAGING_REGION_LAZY;  // Mark this region as lazily allocated
-    new_region->next = st->region_list;     // Add it to the head of the region list
-    st->region_list = new_region;           // Update the region list in the paging state
+    new_region->base_addr = vaddr;             // Start of the reserved virtual address range
+    new_region->region_size = aligned_bytes;   // Size of the allocated virtual memory region
+    new_region->flags = VREGION_FLAGS_READ_WRITE; // Default permissions
+    new_region->type = PAGING_REGION_LAZY;     // Mark as lazily allocated
+    new_region->next = st->region_list;        // Add it to the head of the region list
+    st->region_list = new_region;              // Update the region list
 
-    // Return the base virtual address of the reserved region
-    *buf = (void *)vaddr;
-
-    // printf("Reserved virtual address range [%p - %p] as lazily allocated\n",
-    //        (void *)vaddr, (void *)(vaddr + aligned_bytes));
-
+    // Return success
     return SYS_ERR_OK;
 }
-
 
 
 
@@ -732,42 +789,42 @@ void page_fault_handler(void *faulting_address)
  *
  * @return SYS_ERR_OK on success, or an error indicating failure.
  */
-errval_t add_to_free_list(struct paging_state *st, lvaddr_t base_addr, size_t region_size) {
-    // Allocate a new region node using the slab allocator
-    struct paging_region *new_region = slab_alloc(&st->slab_allocator);
-    if (new_region == NULL) {
-        return LIB_ERR_SLAB_ALLOC_FAIL;
-    }
+// errval_t add_to_free_list(struct paging_state *st, lvaddr_t base_addr, size_t region_size) {
+//     // Allocate a new region node using the slab allocator
+//     struct paging_region *new_region = slab_alloc(&st->slab_allocator);
+//     if (new_region == NULL) {
+//         return LIB_ERR_SLAB_ALLOC_FAIL;
+//     }
 
-    // Initialize the new region
-    new_region->base_addr = base_addr;
-    new_region->region_size = region_size;
-    new_region->next = NULL;
+//     // Initialize the new region
+//     new_region->base_addr = base_addr;
+//     new_region->region_size = region_size;
+//     new_region->next = NULL;
 
-    // Insert the new region into the free list, maintaining sorted order by base address
-    struct paging_region *prev = NULL;
-    struct paging_region *curr = st->free_list;
+//     // Insert the new region into the free list, maintaining sorted order by base address
+//     struct paging_region *prev = NULL;
+//     struct paging_region *curr = st->free_list;
 
-    while (curr != NULL && curr->base_addr < new_region->base_addr) {
-        prev = curr;
-        curr = curr->next;
-    }
+//     while (curr != NULL && curr->base_addr < new_region->base_addr) {
+//         prev = curr;
+//         curr = curr->next;
+//     }
 
-    // Insert the new region between prev and curr
-    if (prev == NULL) {
-        // Insert at the head of the list
-        new_region->next = st->free_list;
-        st->free_list = new_region;
-    } else {
-        prev->next = new_region;
-        new_region->next = curr;
-    }
+//     // Insert the new region between prev and curr
+//     if (prev == NULL) {
+//         // Insert at the head of the list
+//         new_region->next = st->free_list;
+//         st->free_list = new_region;
+//     } else {
+//         prev->next = new_region;
+//         new_region->next = curr;
+//     }
 
-    // Merge adjacent regions if possible to reduce fragmentation
-    merge_adjacent_regions(st);
+//     // Merge adjacent regions if possible to reduce fragmentation
+//     merge_adjacent_regions(st);
 
-    return SYS_ERR_OK;
-}
+//     return SYS_ERR_OK;
+// }
 
 
 /**
@@ -775,24 +832,24 @@ errval_t add_to_free_list(struct paging_state *st, lvaddr_t base_addr, size_t re
  *
  * @param[in] st  The paging state containing the free list.
  */
-void merge_adjacent_regions(struct paging_state *st) {
-    struct paging_region *curr = st->free_list;
+// void merge_adjacent_regions(struct paging_state *st) {
+//     struct paging_region *curr = st->free_list;
 
-    while (curr != NULL && curr->next != NULL) {
-        // Check if the current region is adjacent to the next region
-        if (curr->base_addr + curr->region_size == curr->next->base_addr) {
-            // Merge the current region with the next one
-            curr->region_size += curr->next->region_size;
+//     while (curr != NULL && curr->next != NULL) {
+//         // Check if the current region is adjacent to the next region
+//         if (curr->base_addr + curr->region_size == curr->next->base_addr) {
+//             // Merge the current region with the next one
+//             curr->region_size += curr->next->region_size;
 
-            // Remove the next region from the list
-            struct paging_region *next = curr->next;
-            curr->next = next->next;
-            slab_free(&st->slab_allocator, next);
-        } else {
-            curr = curr->next;
-        }
-    }
-}
+//             // Remove the next region from the list
+//             struct paging_region *next = curr->next;
+//             curr->next = next->next;
+//             slab_free(&st->slab_allocator, next);
+//         } else {
+//             curr = curr->next;
+//         }
+//     }
+// }
 
 
 
@@ -858,7 +915,7 @@ errval_t paging_unmap(struct paging_state *st, const void *region) {
     // printf("[paging_unmap] Freed mapped_region structure for address: %p\n", (void *)region);
 
     // Add the unmapped region back to the free list
-    add_to_free_list(st, curr->base_addr, curr->region_size);
+    //add_to_free_list(st, curr->base_addr, curr->region_size);
 
     return SYS_ERR_OK;
 }

@@ -42,6 +42,8 @@
 typedef int paging_flags_t;
 
 #define NUM_PT_SLOTS 512
+#define VADDR_CALCULATE(L0, L1, L2, L3, offset)                                                    \
+    (offset) + (((int64_t)(L3)) << 12) + (((int64_t)(L2)) << 21) + (((int64_t)(L1)) << 30) + (((int64_t)(L0)) << 39);
 
 // track which virtual address ranges are lazily allocated
 enum paging_region_type {
