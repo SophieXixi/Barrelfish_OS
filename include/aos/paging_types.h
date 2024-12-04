@@ -42,40 +42,14 @@
 typedef int paging_flags_t;
 
 #define NUM_PT_SLOTS 512
+#define NUM_PTS_ALLOC 2048
 #define VADDR_CALCULATE(L0, L1, L2, L3, offset)                                                    \
     (offset) + (((int64_t)(L3)) << 12) + (((int64_t)(L2)) << 21) + (((int64_t)(L1)) << 30) + (((int64_t)(L0)) << 39);
 
-// track which virtual address ranges are lazily allocated
-enum paging_region_type {
-    PAGING_REGION_FREE,    ///< Free virtual memory region not yet allocated
-    PAGING_REGION_LAZY,    ///< Lazily allocated region
-    PAGING_REGION_MAPPED,  ///< Fully mapped region
-};
-
-struct paging_region {
-    lvaddr_t base_addr;      ///< Base virtual address of the region
-    size_t region_size;      ///< Size of the region in bytes
-    paging_flags_t flags;    ///< Permissions (read, write, etc.)
-    enum paging_region_type type;  ///< Type of the region (lazy, mapped, free)
-    struct paging_region *next;    ///< Next region in the linked list
-};
-
-struct mapped_region {
-    lvaddr_t base_addr;        ///< Base virtual address of the mapped region
-    size_t region_size;        ///< Size of the mapped region in bytes
-    paging_flags_t flags;      ///< Mapping flags (e.g., read, write, execute)
-    struct capref frame_cap;   ///< Capability reference to the mapped frame
-    size_t offset;             ///< Offset within the frame where the mapping starts
-    struct capref mapping_cap; // Frame capability backing the memory
-    bool is_unmapped;       // Flag to indicate if the region is already unmapped
-    struct mapped_region *next; ///< Pointer to the next mapped region in the linked list
-};
-
-
 struct page_table {
+    uint64_t numFree;
     struct page_table *parent;
     struct capref mapping;
-    struct capref cap;
     struct capref self;
     size_t offset;
     size_t numBytes;
@@ -90,13 +64,16 @@ struct paging_state {
     lvaddr_t current_vaddr;
     struct slab_allocator slab_allocator;
     struct page_table *root;
-    struct paging_region *region_list;
-    struct paging_region *free_list;
-    struct mapped_region *mapped_list; 
-    struct thread_mutex paging_mutex;
-    struct thread_mutex heap_mutex;
-    int add_slot;
-    int curr_slot;
+     char slab_buf[SLAB_STATIC_SIZE(NUM_PTS_ALLOC, sizeof(struct page_table))];
+    
+    // int add_slot;
+    // int curr_slot;
+    //struct paging_region *region_list;
+    //struct paging_region *free_list;
+    //struct mapped_region *mapped_list; 
+    // struct thread_mutex paging_mutex;
+    // struct thread_mutex heap_mutex;
+
 
     /// virtual address from which to allocate from.
     /// TODO(M2): replace me with proper region management

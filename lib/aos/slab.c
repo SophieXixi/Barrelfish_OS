@@ -217,56 +217,26 @@ static errval_t slab_refill_pages(struct slab_allocator *slabs, size_t bytes)
 errval_t slab_refill_no_pagefault(struct slab_allocator *slabs, struct capref frame_slot,
                                   size_t minbytes)
 {
-    // errval_t err;
-    // struct frame_identity fi;
-
-    // // Retrieve the frame's identity (its size and base address)
-    // err = frame_identify(frame_slot, &fi);
-    // if (err_is_fail(err)) {
-    //     debug_printf("slab refill fault becuase of frame_identity\n");
-    //     return err_push(err, LIB_ERR_FRAME_IDENTIFY);
-    // }
-
-    // // Ensure the frame contains at least the required amount of memory
-    // if (fi.bytes < minbytes) {
-    //     debug_printf("slab refill fault becuase the frame is not big enough\n");
-    //     return PORT_ERR_NOT_ENOUGH_MEMORY;
-    // }
-    
-    // // Must be mapped into the virtual address space so that the process can access and use the memory for allocations
-    // // Map the frame into virtual memory if not already mapped
-    // void *buf;
-    // err = paging_map_frame_attr(get_current_paging_state(), &buf, fi.bytes, frame_slot, VREGION_FLAGS_READ_WRITE);
-    // if (err_is_fail(err)) {
-    //     debug_printf("slab refill fault becuase of paging_map_frame_attr\n");
-    //     return err_push(err, LIB_ERR_VSPACE_MAP);
-    // }
-
-    // // Add the memory to the slab allocator using the slab_grow function
-    // slab_grow(slabs, buf, fi.bytes);
-
-    // return SYS_ERR_OK;
-
     // make compiler happy about unused parameters
-(void)slabs;
-(void)frame_slot;
-(void)minbytes;
+    (void)slabs;
+    (void)frame_slot;
+    (void)minbytes;
 
-errval_t err;
-// TODO: Refill the slot allocator without causing a page-fault
-size_t actualBytes;
-err = frame_create(frame_slot, minbytes, &actualBytes);
-if (err_is_fail(err)) {
-return err;
-}
+    errval_t err;
+    // TODO: Refill the slot allocator without causing a page-fault
+    size_t actualBytes;
+    err = frame_create(frame_slot, minbytes, &actualBytes);
+    if (err_is_fail(err)) {
+    return err;
+    }
 
-void *buf;
-err = paging_map_frame_attr_offset(get_current_paging_state(), &buf, actualBytes, frame_slot, 0, VREGION_FLAGS_READ_WRITE);
-if (err_is_fail(err)) {
-return err;
-}
+    void *buf;
+    err = paging_map_frame_attr_offset(get_current_paging_state(), &buf, actualBytes, frame_slot, 0, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+    return err;
+    }
 
-slab_grow(slabs, buf, actualBytes);
+    slab_grow(slabs, buf, actualBytes);
 
 return SYS_ERR_OK;
 }

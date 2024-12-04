@@ -134,37 +134,86 @@ errval_t morecore_init(size_t alignment)
  */
 void *morecore_alloc(size_t bytes, size_t *retbytes)
 {
-    void *buf;
-    struct morecore_state *state = get_morecore_state();
+    // void *buf;
+    // struct morecore_state *state = get_morecore_state();
    
-    debug_printf("Allocating a frame for initial heap\n");
+    // debug_printf("Allocating a frame for initial heap\n");
     
-    paging_alloc(get_current_paging_state(), &buf, bytes, state->alignment);
+    // paging_alloc(get_current_paging_state(), &buf, bytes, state->alignment);
 
-    if (buf == NULL) {
-        *retbytes = 0;
+    // if (buf == NULL) {
+    //     *retbytes = 0;
+    //     return NULL;
+    // }
+
+    // *retbytes = bytes;
+
+    // // Track the newly allocated region
+    // struct allocated_region *new_region = slab_alloc(&state->slab_allocator);
+    // if (new_region == NULL) {
+    //     // Allocation tracking failed, free the memory
+    //     paging_unmap(get_current_paging_state(), buf);
+    //     *retbytes = 0;
+    //     return NULL;
+    // }
+
+    // new_region->base = buf;
+    // new_region->size = bytes;
+    // new_region->next = state->allocated_list;
+    // state->allocated_list = new_region;
+
+    // debug_printf("Allocated and tracked memory region [%p - %p]\n", buf, (char *)buf + bytes);
+
+    // return buf;
+    struct morecore_state *state = get_morecore_state();
+    printf("[DEBUG] Retrieved morecore state: %p\n", state);
+
+    struct allocdBlock *curr = state->root;
+    printf("[DEBUG] Current root block: %p\n", curr);
+
+    // Refill the slab allocator if needed
+    slab_refill_check(&(state->slab_allocator));
+    printf("[DEBUG] Slab allocator checked and refilled if needed.\n");
+
+    // Allocate a new block from the slab
+    curr = slab_alloc(&(state->slab_allocator));
+    if (curr == NULL) {
+        printf("[ERROR] Slab allocation failed for a new block.\n");
         return NULL;
     }
+    printf("[DEBUG] Allocated new block: %p\n", curr);
 
+    // Allocate a frame for the requested bytes
+    struct capref cap;
+    errval_t err = frame_alloc(&cap, bytes, NULL);
+    if (err_is_fail(err)) {
+        printf("[ERROR] Frame allocation failed for %zu bytes: %s\n", bytes, err_getstring(err));
+        return NULL;
+    }
+    printf("[DEBUG] Allocated frame: %zu bytes, cap: %p\n", bytes, (void *)&cap);
+
+    // Map the frame into the virtual address space
+    err = paging_map_frame_attr_offset(
+        get_current_paging_state(), 
+        (void **)(&curr->vaddr), 
+        bytes, 
+        cap, 
+        0, 
+        VREGION_FLAGS_READ_WRITE
+    );
+    if (err_is_fail(err)) {
+        printf("[ERROR] Paging map failed for frame: %s\n", err_getstring(err));
+        return NULL;
+    }
+    printf("[DEBUG] Mapped frame at virtual address: %p\n", (void *)curr->vaddr);
+
+    // Set up the block metadata
+    curr->next = NULL;
     *retbytes = bytes;
+    printf("[DEBUG] Block setup complete. Virtual address: %p, Size: %zu bytes\n", (void *)curr->vaddr, bytes);
 
-    // Track the newly allocated region
-    struct allocated_region *new_region = slab_alloc(&state->slab_allocator);
-    if (new_region == NULL) {
-        // Allocation tracking failed, free the memory
-        paging_unmap(get_current_paging_state(), buf);
-        *retbytes = 0;
-        return NULL;
-    }
+    return (void *)(curr->vaddr);
 
-    new_region->base = buf;
-    new_region->size = bytes;
-    new_region->next = state->allocated_list;
-    state->allocated_list = new_region;
-
-    debug_printf("Allocated and tracked memory region [%p - %p]\n", buf, (char *)buf + bytes);
-
-    return buf;
 }
 
 /**
@@ -175,50 +224,69 @@ void *morecore_alloc(size_t bytes, size_t *retbytes)
  */
 static void morecore_free(void *base, size_t bytes)
 {
-    struct morecore_state *state = get_morecore_state();
-    struct allocated_region *prev = NULL;
-    struct allocated_region *curr = state->allocated_list;
+    // struct morecore_state *state = get_morecore_state();
+    // struct allocated_region *prev = NULL;
+    // struct allocated_region *curr = state->allocated_list;
 
-    // Find the allocated region in the list
+    // // Find the allocated region in the list
+    // while (curr != NULL) {
+    //     if (curr->base == base && curr->size == bytes) {
+    //         break;
+    //     }
+    //     prev = curr;
+    //     curr = curr->next;
+    // }
+
+    // // If the region is not found, panic
+    // if (curr == NULL) {
+    //     USER_PANIC("Attempted to free unallocated or mismatched region: %p\n", base);
+    //     return;
+    // }
+
+    // // Unmap the memory region
+    // errval_t err = paging_unmap(get_current_paging_state(), base);
+    // if (err_is_fail(err)) {
+    //     USER_PANIC("Failed to unmap memory: %s\n", err_getstring(err));
+    //     return;
+    // }
+
+    // // Add the freed memory back to the free list
+    // //err = add_to_free_list(get_current_paging_state(), (lvaddr_t)base, bytes);
+    // if (err_is_fail(err)) {
+    //     USER_PANIC("Failed to add freed region back to free list\n");
+    //     return;
+    // }
+
+    // // Remove the region from the allocated list
+    // if (prev == NULL) {
+    //     state->allocated_list = curr->next;
+    // } else {
+    //     prev->next = curr->next;
+    // }
+
+    // // Free the allocated_region structure
+    // slab_free(&state->slab_allocator, curr);
+
+    // debug_printf("Successfully freed memory region [%p - %p]\n", base, (char *)base + bytes);
+
+     (void)base;
+    (void)bytes;
+    struct morecore_state *state = get_morecore_state();
+    struct allocdBlock * curr = state->root;
+    struct allocdBlock * prev = curr;
     while (curr != NULL) {
-        if (curr->base == base && curr->size == bytes) {
-            break;
+        if (curr->vaddr == (lvaddr_t)base) {
+            paging_unmap(get_current_paging_state(),base);
+            prev->next = curr->next;
+            // printf("found it!\n");
+            //TODO: slab free curr
+            return;
         }
         prev = curr;
         curr = curr->next;
     }
-
-    // If the region is not found, panic
-    if (curr == NULL) {
-        USER_PANIC("Attempted to free unallocated or mismatched region: %p\n", base);
-        return;
-    }
-
-    // Unmap the memory region
-    errval_t err = paging_unmap(get_current_paging_state(), base);
-    if (err_is_fail(err)) {
-        USER_PANIC("Failed to unmap memory: %s\n", err_getstring(err));
-        return;
-    }
-
-    // Add the freed memory back to the free list
-    //err = add_to_free_list(get_current_paging_state(), (lvaddr_t)base, bytes);
-    if (err_is_fail(err)) {
-        USER_PANIC("Failed to add freed region back to free list\n");
-        return;
-    }
-
-    // Remove the region from the allocated list
-    if (prev == NULL) {
-        state->allocated_list = curr->next;
-    } else {
-        prev->next = curr->next;
-    }
-
-    // Free the allocated_region structure
-    slab_free(&state->slab_allocator, curr);
-
-    debug_printf("Successfully freed memory region [%p - %p]\n", base, (char *)base + bytes);
+    // printf("never found it\n");
+    return;
 }
 
 /**
@@ -232,21 +300,32 @@ errval_t morecore_init(size_t alignment)
 {
     // make compiler happy about unused parameters
 
-    struct morecore_state *state = get_morecore_state();
+    // struct morecore_state *state = get_morecore_state();
 
-    debug_printf("initializing static heap\n");
+    // debug_printf("initializing static heap\n");
 
-    thread_mutex_init(&state->mutex);
+    // thread_mutex_init(&state->mutex);
 
-    static char initial_slab_buffer[100 * 20480];
-    slab_init(&state->slab_allocator, sizeof(struct page_table), NULL);
-    slab_grow(&state->slab_allocator, initial_slab_buffer, sizeof(initial_slab_buffer));
+    // static char initial_slab_buffer[100 * 20480];
+    // slab_init(&state->slab_allocator, sizeof(struct page_table), NULL);
+    // slab_grow(&state->slab_allocator, initial_slab_buffer, sizeof(initial_slab_buffer));
 
-    state->alignment = alignment;
-    state->allocated_list = NULL;
+    // state->alignment = alignment;
+    // state->allocated_list = NULL;
+
+    // sys_morecore_alloc = morecore_alloc;
+    // sys_morecore_free = morecore_free;
+    // return SYS_ERR_OK;
+     struct morecore_state *state = get_morecore_state();
 
     sys_morecore_alloc = morecore_alloc;
     sys_morecore_free = morecore_free;
+
+    slab_init(&state->slab_allocator, sizeof(struct allocdBlock), NULL);
+    slab_grow(&state->slab_allocator, state->slab_buf, SLAB_STATIC_SIZE(NUM_MEM_BLOCKS_ALLOC, sizeof(struct allocdBlock)));
+    state->root = NULL;
+    state->alignment = alignment;
+
     return SYS_ERR_OK;
 }
 

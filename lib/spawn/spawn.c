@@ -258,6 +258,7 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
         debug_printf("Failed to load ELF: %s\n", err_getstring(err));
         return err;
     }
+    
     printf("LOADED THE ELF");
 
     // step 5: set up the dispatcher

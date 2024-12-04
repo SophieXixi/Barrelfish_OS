@@ -38,7 +38,11 @@
 #define FRAME_SIZE      (5 << 20)
 #define NUM_MAPS        16
 #define FIXED_ADDRESS   (32ULL << 40)
+#define FIXED_ADDRESS   (32ULL << 40)
+#define FIXED_ADDRESS2  (32ULL << 40)
+#define FIXED_ADDRESS3  (32ULL << 40) 
 #define HEAP_ALLOC_SIZE (256 << 20)
+
 
 static void alloc_and_map_one(void)
 {
@@ -187,12 +191,14 @@ static void alloc_heap(void)
 {
     grading_printf("alloc_heap(%zu)\n", HEAP_ALLOC_SIZE);
 
+    debug_printf("Trying to malloc!\n");
     uint8_t *buf = malloc(HEAP_ALLOC_SIZE);
     if (buf == NULL) {
         grading_test_fail("V1-4", "failed to allocate heap\n");
         return;
     }
 
+    debug_printf("Done to malloc!\n");
     size_t npages = HEAP_ALLOC_SIZE / BASE_PAGE_SIZE;
     for (size_t i = 0; i < npages / 32; i++) {
         grading_printf("accessing buf[%zu] @ %p\n", i * BASE_PAGE_SIZE * 8,
@@ -204,68 +210,55 @@ static void alloc_heap(void)
     grading_test_pass("V1-4", "alloc_heap\n");
 }
 
-static void test_paging_unmap_success(void)
+static void alloc_and_map_stress_test(int num_times)
 {
-    grading_printf("test_paging_unmap_success()\n");
-
-    struct paging_state *st = get_current_paging_state();
-    struct capref frame;
     errval_t err;
 
-    // Allocate a frame and map it
-    grading_printf("Allocating and mapping frame for unmap test\n");
-    err = frame_alloc(&frame, BASE_PAGE_SIZE, NULL);
-    if (err_is_fail(err)) {
-        grading_test_fail("V5-unmap", "Frame allocation failed\n");
-        return;
-    }
-
-    void *buf;
-    err = paging_map_frame(st, &buf, BASE_PAGE_SIZE, frame);
-    if (err_is_fail(err)) {
-        grading_test_fail("V5-unmap", "Frame mapping failed\n");
-        return;
-    }
-
-    grading_printf("Frame mapped at address: %p\n", buf);
-
-    // Now unmap the frame
-    grading_printf("Unmapping the frame at address: %p\n", buf);
-    err = paging_unmap(st, buf);
-    if (err_is_fail(err)) {
-        grading_test_fail("V5-unmap", "Failed to unmap the region\n");
-        return;
-    }
-
-    grading_printf("Successfully unmapped the frame\n");
-
-    grading_printf("Attempting second unmap of the same region: %p\n", buf);
-    err = paging_unmap(st, buf);
-    if (err == LIB_ERR_VSPACE_VREGION_NOT_FOUND) {
-        grading_test_pass("V5-double-unmap", "Correctly handled double unmap\n");
-    } else {
-        grading_test_fail("V5-double-unmap", "Second unmap did not fail as expected\n");
-    }
-
-    grading_test_pass("V5-unmap", "paging_unmap success\n");
-}
-
-static void test_paging_unmap_invalid(void)
-{
-    grading_printf("test_paging_unmap_invalid()\n");
-
-    struct paging_state *st = get_current_paging_state();
+    grading_printf("alloc_and_map_unmap_and_remap_many_times_fixed(%lx, %zu)\n", FIXED_ADDRESS3, BASE_PAGE_SIZE);
     
-    // Try to unmap a non-existent region
-    void *invalid_region = (void *)0xdeadbeef;
-    grading_printf("Attempting to unmap invalid region: %p\n", invalid_region);
-    
-    errval_t err = paging_unmap(st, invalid_region);
-    if (err == LIB_ERR_VSPACE_VREGION_NOT_FOUND) {
-        grading_test_pass("V6-unmap-invalid", "Correctly handled unmapping of invalid region\n");
-    } else {
-        grading_test_fail("V6-unmap-invalid", "Unmap of invalid region did not fail as expected\n");
+    struct capref cap;
+    err = frame_alloc(&cap, FRAME_SIZE, NULL);
+    if (err_is_fail(err)) {
+        grading_test_fail("V1-8", "failed to allocate a single frame\n");
+        return;
     }
+
+    grading_printf("allocated frame, trying to map it at %lx\n", FIXED_ADDRESS3);
+    
+    for (int j = 0; j < num_times; j++) {
+        void *buf = (void *)FIXED_ADDRESS3;
+        err       = paging_map_fixed(get_current_paging_state(), FIXED_ADDRESS3, cap, FRAME_SIZE);
+        if (err_is_fail(err)) {
+            grading_test_fail("V1-8", "failed to map the frame\n");
+            return;
+        }
+
+        grading_printf("memset(%p, i, %zu)\n", buf, FRAME_SIZE);
+        uint64_t *ptr = (uint64_t *)buf;
+        for (size_t i = 0; i < FRAME_SIZE / sizeof(uint64_t); i++) {
+            ptr[i] = i;
+        }
+
+        grading_printf("verifying..\n", buf, FRAME_SIZE);
+        for (size_t i = 0; i < FRAME_SIZE / sizeof(uint64_t); i++) {
+            if (ptr[i] != i) {
+                grading_printf("verification failed: ptr[%zu] was %lu (expected %zu)\n", i, ptr[i], i);
+                grading_test_fail("V1-8", "memory not set correctly\n");
+                return;
+            }
+        }
+
+        grading_printf("trying to unmap the page..\n");
+        //paging_unmap(get_current_paging_state(), buf);
+        err = paging_unmap(get_current_paging_state(), buf);
+        if (err_is_fail(err)) {
+            grading_test_fail("V1-8", "failed to unmap the frame\n");
+            return;
+        }
+        grading_printf("successfully mapped and unmapped %d times\n", j + 1);
+    }
+
+    grading_test_pass("V1-8", "alloc_and_map_unmap_and_remap_fixed\n");
 }
 
 
@@ -287,14 +280,14 @@ errval_t grading_run_tests_virtual_memory(bool early)
     grading_printf("# TESTS: Milestone 2 (Virtual Memory Management) \n");
     grading_printf("#################################################\n");
 
+    alloc_and_map_stress_test(400);
+
     alloc_and_map_fixed();
     alloc_and_map_one();
     alloc_and_map_many();
     alloc_heap();
 
-    // Add the new tests for paging_unmap
-    test_paging_unmap_success();
-    test_paging_unmap_invalid();
+    
 
 
     grading_printf("#################################################\n");

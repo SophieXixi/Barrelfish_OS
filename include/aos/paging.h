@@ -24,8 +24,6 @@ struct thread;
 struct paging_state;
 
 
-errval_t allocate_new_pagetable(struct paging_state * st, capaddr_t slot, 
-                  uint64_t offset, uint64_t pte_ct, enum objtype type, struct page_table * parent); 
 void pf_handler(enum exception_type type, int subtype, void *addr, arch_registers_state_t *regs);
 void page_fault_handler(void *faulting_address);
 errval_t add_to_free_list(struct paging_state *st, lvaddr_t base_addr, size_t region_size);
