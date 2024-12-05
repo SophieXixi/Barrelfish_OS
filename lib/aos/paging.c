@@ -426,11 +426,11 @@ errval_t paging_map_frame_attr_offset(struct paging_state *st, void **buf, size_
 
     paging_alloc(st, buf, bytes, BASE_PAGE_SIZE);
     
-    size_t aligned_bytes = ROUND_UP(bytes, BASE_PAGE_SIZE);
+    //size_t aligned_bytes = ROUND_UP(bytes, BASE_PAGE_SIZE);
 
     // This eager allocation works
     genvaddr_t vaddr = (genvaddr_t)*buf;
-    errval_t err = paging_map_fixed_attr_offset(st, vaddr, frame, aligned_bytes, offset, flags);
+    errval_t err = paging_map_fixed_attr_offset(st, vaddr, frame, bytes, offset, flags);
     if (err_is_fail(err)) {
         printf("vnode_map failed after paging_map_fixed_attr_offset: %s\n", err_getstring(err));
         return -1;
