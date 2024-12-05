@@ -29,23 +29,29 @@
  */
 char **make_argv(const char *cmdline, int *_argc, char **buf)
 {
+    
     char **argv = calloc(MAX_CMDLINE_ARGS + 1, sizeof(char *));
     if (!argv)
         return NULL;
 
+    printf("did calloc");
     /* Carefully calculate the length of the command line. */
     size_t len = strnlen(cmdline, PATH_MAX + 1);
     if (len > PATH_MAX)
         return NULL;
 
+    printf("did strnlen\n");
     /* Copy the command line, as we'll chop it up. */
     *buf = malloc(len + 1);
     if (!*buf) {
         free(argv);
         return NULL;
     }
+        printf("did malloc\n");
+
     strncpy(*buf, cmdline, len + 1);
     (*buf)[len] = '\0';
+        printf("did strncpy\n");
 
     int    argc = 0;
     size_t i    = 0;

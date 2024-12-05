@@ -32,6 +32,11 @@
 
 #define HEAP_ALLOC_SIZE (256 << 10)
 
+#define MAX_BINARY_NAME_LENGTH 256
+
+// Declare a static or stack-allocated array
+
+
 
 
 
@@ -62,8 +67,30 @@ __attribute__((__used__)) static void armv8_set_registers(dispatcher_handle_t ha
     disabled_area->regs[REG_OFFSET(PIC_REGISTER)] = got_base;
     disabled_area->named.pc                       = entry;
 }
+static errval_t parse_args(const char *cmdline, int *argc, char *argv[]);
+static errval_t parse_args(const char *cmdline, int *argc, char *argv[])
+{
+    // check if we have at least one argument
+    if (argv == NULL || argv[0] == NULL || argc == NULL || cmdline == NULL) {
+        return CAPS_ERR_INVALID_ARGS;
+    }
 
+    // parse cmdline, split on spaces
+    char cmdline_ptr[MAX_CMDLINE_ARGS + 1];
+    strncpy(cmdline_ptr, cmdline, strlen(cmdline) + 1);
+    char *token = strtok(cmdline_ptr, " ");
+    int i = 0;
+    *argc = 0;
 
+    while (token != NULL && i < MAX_CMDLINE_ARGS) {
+        argv[i++] = token;
+        (*argc)++;
+        token = strtok(NULL, " ");
+    }
+    argv[i] = NULL;
+
+    return SYS_ERR_OK;
+}
 
 
 /**
@@ -126,12 +153,19 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     // - Fill in argc/argv from the multiboot command line
     //const char *cmdline = multiboot_module_opts(module);
     int argc;  // `argc` is declared without being initialized
-    char *buf = NULL;  // `buf` is initialized to NULL
-    char **argv = make_argv(name, &argc, &buf);
-    if (!argv) {
+    //char *buf;  // `buf` is initialized to NULL
+    //char **argv = make_argv(name, &argc, &buf);
+    char* strings = (char *)multiboot_module_opts(module);
+    const char *argv[MAX_CMDLINE_ARGS];
+    argv[0] = strings;
+
+
+    err = parse_args(strings, &argc, (char **)argv);
+    if (err_is_fail(err)) {
         debug_printf("Error: Failed to parse arguments from command line\n");
-        return SPAWN_ERR_CREATE_ARGSPG;
+        return err;
     }
+
     printf("Created arguments argc = %d\n", argc);
 
     // Print out each argument to verify
@@ -140,12 +174,16 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     }
 
     // Allocate and copy the binary name
-    si->binary_name = malloc(strlen((char*)argv[0]) + 1);
-    if (si->binary_name == NULL) {
-        debug_printf("malloc failed\n");
-        abort();
-    }
-    strcpy(si->binary_name, (char*) argv[0]);
+    // si->binary_name = malloc(strlen((char*)argv[0]) + 1);
+    // if (si->binary_name == NULL) {
+    //     debug_printf("malloc failed\n");
+    //     abort();
+    // }
+
+    char binary_name[MAX_BINARY_NAME_LENGTH];
+
+    strcpy(binary_name, (char*) argv[0]);
+    si->binary_name = binary_name;
     printf("BINARY NAME: %s\n", si->binary_name);
 
 

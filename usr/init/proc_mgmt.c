@@ -224,8 +224,6 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
         USER_PANIC("spawn_load_with_caps err in spawn_start: %s\n", err_getstring(err));
     }
 
-    
-
     return SYS_ERR_OK;
 
     
@@ -376,7 +374,6 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
     }
     printf("Process loaded successfully for PID %u\n", *pid);
     
-
     pro_node->si->state = SPAWN_STATE_READY;
     err = spawn_start(pro_node->si);
     if (err_is_fail(err)) {
@@ -384,17 +381,6 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
         return err;
     }
     printf("Process running successfully for PID %u\n", *pid);
-
-
-    // Optional: Update proc_manager with the new process
-    // Ensure memory for `processes` array is allocated or reallocated
-    // and add `&si` to `proc_manager->processes`
-
-    //  - find the image
-    //  - allocate a PID
-    //  - use the spawn library to construct a new process
-    //  - start the new process
-    //  - keep track of the spawned process
 
 
     return SYS_ERR_OK;
