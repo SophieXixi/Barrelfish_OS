@@ -462,7 +462,12 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
 {   
     (void)si;
     size_t bufsize = SINGLE_SLOT_ALLOC_BUFLEN(L2_CNODE_SLOTS);
-    void *buf = malloc(bufsize);
+    static char static_buf[SINGLE_SLOT_ALLOC_BUFLEN(L2_CNODE_SLOTS)];
+
+
+    printf("before buf malloc\n");
+    void *buf = static_buf;
+    printf("after buf malloc\n");
     assert(buf != NULL);
 
     printf("  &si->single_slot_alloc: %p\n", (void*)&si->single_slot_alloc);

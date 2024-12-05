@@ -176,8 +176,12 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
 
     pro_node->si->binary_name = malloc(strlen((char*)argv[0]) + 1);
     pro_node->name = malloc(strlen((char*)argv[0]) + 1);
+    printf("after malloc%u\n", *pid);
+
 
     strcpy(pro_node->si->binary_name, (char*) argv[0]);
+        printf("after strcpy%u\n", *pid);
+
 
     
     struct mem_region* module = multiboot_find_module(bi, argv[0]);
@@ -288,11 +292,16 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
         return SYS_ERR_OK;
     }
 
+    printf("reach before args\n");
     // Parse the command line into arguments
     const char *argv[MAX_CMDLINE_ARGS];
     argv[0] = cmdline;
     int argc = 0;
+    printf("reach before parse args\n");
+
     parse_args(cmdline, &argc, (char **)argv);
+    printf("reach after parse args\n");
+
 
     // Spawn the process with parsed arguments
     return proc_mgmt_spawn_with_caps(argc, argv, 0, NULL, core, pid);
