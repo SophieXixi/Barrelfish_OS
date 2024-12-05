@@ -22,12 +22,14 @@
 //extern void* urpc_buf;
 
 genvaddr_t global_urpc_frames[4];
+void * urpc_buf;
 
 struct aos_rpc *global_rpc;
 domainid_t global_pid;
 struct capref global_retcap;
 size_t global_retbytes;
 char global_retchar;
+extern
 
 /*
  * ===============================================================================================
@@ -293,7 +295,7 @@ struct ump_chan *get_channel_for_current_core(int direction) {
     //const size_t offset = BASE_PAGE_SIZE / 2;
 
     // Access the shared memory region mapped for the current core and monitor
-    return (struct ump_chan *)(MON_URPC_VBASE + offset);
+    return (struct ump_chan *)(urpc_buf + offset);
 }
 
 // reset pointers and zero out a struct ump_chan
@@ -317,7 +319,7 @@ errval_t ump_chan_init(struct ump_chan *chan, size_t base) {
  */
 errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) {
     // Check if the message size is valid
-    if (message_size > 60) {
+    if (message_size > 56) {
         debug_printf("Error: UMP message exceeds the maximum allowed size of 60 bytes\n");
         return LIB_ERR_UMP_BUFSIZE_INVALID;
     }
@@ -337,6 +339,8 @@ errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) 
 
     // Copy the new message into the calculated location in the circular buffer. 
     memcpy((void *)next_cache_line, message, message_size);
+
+    dmb();
 
     // Mark the cache line as valid
     next_cache_line->valid = 1;
@@ -358,6 +362,8 @@ errval_t ump_receive(struct ump_chan *chan, void *buf) {
         return LIB_ERR_NO_UMP_MSG;
     }
     
+    dmb();
+
     // copy out the received message
     memcpy(buf, cl->payload, sizeof(struct ump_payload));
 

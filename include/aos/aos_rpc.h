@@ -140,16 +140,14 @@ struct ump_chan {
  * Each 'slot' in the circular buffer corresponds to a struct cache_line
  */
 struct cache_line {
-    char payload[58];
-    uint8_t frag_num;
-    uint8_t total_frags;
+    char payload[56];
     uint32_t valid;
 };
 
 struct ump_payload {
     enum msg_type type;
     coreid_t core;
-    char payload[60 - sizeof(enum msg_type) - sizeof(coreid_t)];
+    char payload[56 - sizeof(enum msg_type) - sizeof(coreid_t)];
 };
 
 struct spawn_with_caps_frame_input {

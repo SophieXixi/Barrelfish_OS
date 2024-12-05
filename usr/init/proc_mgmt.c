@@ -277,7 +277,7 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
         msg.core = core;
 
         // Safely copy command line into the payload (respecting payload size limits)
-        strncpy(msg.payload, cmdline, sizeof(msg.payload) - sizeof(enum msg_type) - sizeof(coreid_t));
+        strncpy(msg.payload, cmdline, sizeof(msg.payload));
         msg.payload[sizeof(msg.payload) - 1] = '\0';  // Ensure null-termination
 
         // Send the message

@@ -49,6 +49,7 @@ struct lpuart_s *lpuart;
 
 extern struct process_manager *proc_manager;
 extern void initialize_process_manager(struct process_manager **pm);
+extern void *urpc_buf;
 
 //void* urpc_buf;
 
@@ -583,8 +584,8 @@ app_main(int argc, char *argv[]) {
     }
 
     // Mapping the URPC Frame
-    void *urpc_buf; // The shared memory region is used for inter-core communication using URPC 
-    err = paging_map_frame_attr(get_current_paging_state(), &urpc_buf, BASE_PAGE_SIZE,
+    // The shared memory region is used for inter-core communication using URPC 
+    err = paging_map_frame_attr(get_current_paging_state(), &urpc_buf, 4 * BASE_PAGE_SIZE,
     cap_urpc, VREGION_FLAGS_READ_WRITE);
 
     if (err_is_fail(err)) {

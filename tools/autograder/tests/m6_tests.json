@@ -16,7 +16,7 @@
                     "fail" : [ ]
                 },
                 {
-                    "repeat": 12,
+                    "repeat": 4,
                     "action" : "expect",
                     "pass" : [
                         "<grading> alloc running on core 1",

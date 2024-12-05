@@ -550,7 +550,7 @@ errval_t coreboot_boot_core(hwid_t mpid, const char *boot_driver, const char *cp
     // Allocate and map URPC frame for inter-core communication
     struct capref urpc_frame;
     void *urpc_buf;
-    err = allocate_and_map_frame(&urpc_frame, 3 * BASE_PAGE_SIZE, &urpc_buf, VREGION_FLAGS_READ_WRITE);
+    err = allocate_and_map_frame(&urpc_frame, 4 * BASE_PAGE_SIZE, &urpc_buf, VREGION_FLAGS_READ_WRITE);
     if (err_is_fail(err)) return err;
     global_urpc_frames[(uint64_t)mpid] = (genvaddr_t)urpc_buf;
 
