@@ -711,7 +711,7 @@ app_main(int argc, char *argv[]) {
 
         // check for a UMP message
         struct ump_payload payload;
-        err = ump_receive(get_channel_for_current_core(0), &payload);
+        err = ump_receive(get_channel_for_current_core(1), &payload);
         if (err == SYS_ERR_OK) {
             switch (payload.type) {
                 case SPAWN_CMDLINE:

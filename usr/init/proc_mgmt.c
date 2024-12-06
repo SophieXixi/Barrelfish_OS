@@ -261,6 +261,7 @@ domainid_t allocate_pid(struct process_manager *manager) {
 errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domainid_t *pid) {
     // Ensure valid parameters
     // Handle multicore spawning
+    //my_core_id = disp_get_core_id();
     if (core != my_core_id) {
         debug_printf("Spawning on core %d from core %d\n", core, my_core_id);
 
@@ -269,6 +270,8 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
          *  get_channel_for_core_to_monitor(core, 1) gets the monitor-to-core channel (used by the BSP).
             get_channel_for_current_core(0) gets the current-core-to-monitor channel (used by application cores).
          */
+        //struct ump_chan *uchan = (my_core_id == 0) ? get_channel_for_core_to_monitor(core, 1) : get_channel_for_current_core(0);
+
         struct ump_chan *uchan = (my_core_id == 0) ? get_channel_for_core_to_monitor(core, 1) : get_channel_for_current_core(0);
 
         // Construct UMP payload message
@@ -291,6 +294,7 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
 
         return SYS_ERR_OK;
     }
+    debug_printf("spawning the processses on this core: %d\n", disp_get_core_id());
 
     printf("reach before args\n");
     // Parse the command line into arguments

@@ -323,6 +323,7 @@ errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) 
         debug_printf("Error: UMP message exceeds the maximum allowed size of 60 bytes\n");
         return LIB_ERR_UMP_BUFSIZE_INVALID;
     }
+    dmb();
 
     // Check if the UMP queue has space for the new message
     if ((channel->head + 1) % BASE_PAGE_SIZE == channel->tail) {
@@ -344,19 +345,27 @@ errval_t ump_send(struct ump_chan *channel, char *message, size_t message_size) 
 
     // Mark the cache line as valid
     next_cache_line->valid = 1;
-
+    dmb();
     // Advance the head to the next position in the circular buffer
     // Ddding sizeof(struct cache_line), the head is moved to the next slot in the buffer, where the next message will be written.
     channel->head = (channel->head + sizeof(struct cache_line)) % BASE_PAGE_SIZE;
-
+    debug_printf("msg from core:%d sent\n", disp_get_core_id());
+    
     return SYS_ERR_OK;
 }
 
 // receive a message off the ump channel, performing the appropriate action
 errval_t ump_receive(struct ump_chan *chan, void *buf) {
+    dmb();
+    if (chan->tail == chan->head) {
+        return LIB_ERR_NO_UMP_MSG;
+    }
+
+    dmb();
     // get the current cache line
     struct cache_line *cl = (struct cache_line *)((genvaddr_t)chan + chan->base + chan->tail);
 
+    ;
     // make sure we have a message
     if (!cl->valid) {
         return LIB_ERR_NO_UMP_MSG;
