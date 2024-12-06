@@ -175,18 +175,27 @@ void gen_recv_handler(void *arg) {
                 DEBUG_ERR(err, "registering send handler\n");
                 return;
             }
-            //event_dispatch(get_default_waitset());
+
+            event_dispatch(get_default_waitset());
             break;
 
         case NUM_MSG:
             // is num
-            debug_printf("Hey, I know the message is Nnumber now!!\n");
+            debug_printf("This is Number message case in the gen_recv_handler\n");
     
             grading_rpc_handle_number(msg.words[1]);
 
             debug_printf("here is the number we recieved: %d\n", msg.words[1]);
+            
+            err = lmp_chan_register_send(rpc->channel, get_default_waitset(), MKCLOSURE(send_ack_handler, (void*) rpc));
+            if (err_is_fail(err)) {
+                DEBUG_ERR(err, "registering send handler\n");
+                return;
+            }
 
-            //event_dispatch(get_default_waitset());
+            event_dispatch(get_default_waitset());
+            event_dispatch(get_default_waitset());
+
             break;
         case STRING_MSG:
             debug_printf("This is String MSG in the gen_recv_handler\n");
