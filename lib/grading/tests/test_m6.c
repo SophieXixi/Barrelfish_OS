@@ -65,7 +65,7 @@ errval_t grading_run_tests_urpc(void)
     grading_printf("#################################################\n");
 
     spawn_one_without_args(0);
-    //spawn_one_without_args(1);
+    spawn_one_without_args(1);
     //spawn_one_without_args(3);
 
     grading_printf("#################################################\n");

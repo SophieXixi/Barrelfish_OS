@@ -130,6 +130,7 @@ This is managed by the receiver.
 This is an array of cache linze-sized slots
  */
 struct ump_chan {
+    uintptr_t init_flag;
     size_t base;  // offset of base from struct ump_chan
     size_t head;  // offset of head from base
     size_t tail;  // offset of tail from base
