@@ -33,7 +33,7 @@ extern coreid_t         my_core_id;
 struct process_manager *proc_manager;
 struct spawninfo* root = NULL;
 
-static errval_t parse_args(const char *cmdline, int *argc, char *argv[]);
+//static errval_t parse_args(const char *cmdline, int *argc, char *argv[]);
 
 /*
  * ------------------------------------------------------------------------------------------------
@@ -205,7 +205,7 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
                            module->mrmod_size, child_frame);
     
     if (err_is_fail(err)) {
-        USER_PANIC("spawn_load_with_caps err\n");
+        USER_PANIC("spawn_load_with_caps err: %s\n", err_getstring(err));
     }
 
     pro_node->si->module = module;
@@ -273,6 +273,14 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
         //struct ump_chan *uchan = (my_core_id == 0) ? get_channel_for_core_to_monitor(core, 1) : get_channel_for_current_core(0);
 
         struct ump_chan *uchan = (my_core_id == 0) ? get_channel_for_core_to_monitor(core, 1) : get_channel_for_current_core(0);
+        if (uchan->init_flag != 1) {
+            if (my_core_id == 0) {
+                ump_chan_init(uchan, ROUND_UP((genvaddr_t) uchan, BASE_PAGE_SIZE) - (genvaddr_t)uchan + BASE_PAGE_SIZE);
+            } else {
+                ump_chan_init(uchan, ROUND_UP((genvaddr_t) uchan, BASE_PAGE_SIZE) - (genvaddr_t) uchan);
+            }
+            
+        }
 
         // Construct UMP payload message
         struct ump_payload msg;
@@ -296,19 +304,68 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
     }
     debug_printf("spawning the processses on this core: %d\n", disp_get_core_id());
 
-    printf("reach before args\n");
-    // Parse the command line into arguments
-    const char *argv[MAX_CMDLINE_ARGS];
-    argv[0] = cmdline;
-    int argc = 0;
-    printf("reach before parse args\n");
+    // printf("reach before args\n");
+    // // Parse the command line into arguments
+    // const char *argv[MAX_CMDLINE_ARGS];
+    // argv[0] = cmdline;
+    // int argc = 0;
+    // printf("reach before parse args\n");
 
-    parse_args(cmdline, &argc, (char **)argv);
-    printf("reach after parse args\n");
+    // parse_args(cmdline, &argc, (char **)argv);
+    // printf("reach after parse args\n");
 
 
-    // Spawn the process with parsed arguments
-    return proc_mgmt_spawn_with_caps(argc, argv, 0, NULL, core, pid);
+    // // Spawn the process with parsed arguments
+    // return proc_mgmt_spawn_with_caps(argc, argv, 0, NULL, core, pid);
+
+     // Call spawn_load_with_bootinfo to load the process
+    printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
+     // Initialize `spawninfo` structure
+    //struct spawninfo si;
+    printf("si initialized");
+
+
+    // Call spawn_load_with_bootinfo to load the process
+    printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
+    // si.core_id = my_core_id;
+    initialize_process_manager(&proc_manager);
+    *pid =  allocate_pid(proc_manager);
+    struct process_node *pro_node=  allocate_process_node(proc_manager);
+    printf("successful allocate pro_node\n");
+    pro_node->processes->core = core;
+    pro_node->processes->pid = *pid;
+    pro_node->processes->state = PROC_STATE_SPAWNING;
+    pro_node->processes->exit_code = 0;
+    pro_node->name = cmdline;
+
+    
+    printf("allocate new PID in spawn with cmdline%u\n", *pid);
+    errval_t err = spawn_load_with_bootinfo(pro_node->si, bi, cmdline,*pid);
+    if (err_is_fail(err)) {
+        debug_printf("Error loading process: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("Process loaded successfully for PID %u\n", *pid);
+
+    pro_node->si->state = SPAWN_STATE_READY;
+    err = spawn_start(pro_node->si);
+    if (err_is_fail(err)) {
+        debug_printf("Error Starting process: %s\n", err_getstring(err));
+        return err;
+    }
+    printf("Process running successfully for PID %u\n", *pid);
+
+    // Optional: Update proc_manager with the new process
+    // Ensure memory for `processes` array is allocated or reallocated
+    // and add `&si` to `proc_manager->processes`
+
+    //  - find the image
+    //  - allocate a PID
+    //  - use the spawn library to construct a new process
+    //  - start the new process
+    //  - keep track of the spawned process
+
+
     return SYS_ERR_OK;
 }
 
@@ -320,29 +377,29 @@ errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domain
  * @param[out] argc     The number of arguments parsed.
  * @param[out] argv     The array of argument strings.
  */
-static errval_t parse_args(const char *cmdline, int *argc, char *argv[])
-{
-    // check if we have at least one argument
-    if (argv == NULL || argv[0] == NULL || argc == NULL || cmdline == NULL) {
-        return CAPS_ERR_INVALID_ARGS;
-    }
+// static errval_t parse_args(const char *cmdline, int *argc, char *argv[])
+// {
+//     // check if we have at least one argument
+//     if (argv == NULL || argv[0] == NULL || argc == NULL || cmdline == NULL) {
+//         return CAPS_ERR_INVALID_ARGS;
+//     }
 
-    // parse cmdline, split on spaces
-    char cmdline_ptr[MAX_CMDLINE_ARGS + 1];
-    strncpy(cmdline_ptr, cmdline, strlen(cmdline) + 1);
-    char *token = strtok(cmdline_ptr, " ");
-    int i = 0;
-    *argc = 0;
+//     // parse cmdline, split on spaces
+//     char cmdline_ptr[MAX_CMDLINE_ARGS + 1];
+//     strncpy(cmdline_ptr, cmdline, strlen(cmdline) + 1);
+//     char *token = strtok(cmdline_ptr, " ");
+//     int i = 0;
+//     *argc = 0;
 
-    while (token != NULL && i < MAX_CMDLINE_ARGS) {
-        argv[i++] = token;
-        (*argc)++;
-        token = strtok(NULL, " ");
-    }
-    argv[i] = NULL;
+//     while (token != NULL && i < MAX_CMDLINE_ARGS) {
+//         argv[i++] = token;
+//         (*argc)++;
+//         token = strtok(NULL, " ");
+//     }
+//     argv[i] = NULL;
 
-    return SYS_ERR_OK;
-}
+//     return SYS_ERR_OK;
+// }
 
 /**
  * @brief spawns a new process with the default arguments on the given core

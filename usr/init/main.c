@@ -476,13 +476,14 @@ bsp_main(int argc, char *argv[]) {
 
     // Spawn system processes, boot second core etc. here
     // initialize UMP channels
-    for (int i = 1; i < 4; i++) {
+    for (int i = 3; i >=1 ; i--) {
+        //debug_printf("ump_chan 3 ini");
         genvaddr_t ump_addr = (genvaddr_t)get_channel_for_core_to_monitor(i, 0);
         ump_chan_init((struct ump_chan *)ump_addr, ROUND_UP(ump_addr, BASE_PAGE_SIZE) - ump_addr);
         ump_addr = (genvaddr_t)get_channel_for_core_to_monitor(i, 1);
         ump_chan_init((struct ump_chan *)ump_addr, ROUND_UP(ump_addr, BASE_PAGE_SIZE) - ump_addr + BASE_PAGE_SIZE);
     }
-
+    dmb();
 
     // calling late grading tests, required functionality up to here:
     //   - full functionality of the system
@@ -496,8 +497,8 @@ bsp_main(int argc, char *argv[]) {
     struct waitset *default_ws = get_default_waitset();
     while (true) {
         debug_printf("get into the loop\n");
-        err = event_dispatch(default_ws);
-        if (err_is_fail(err)) {
+        err = event_dispatch_non_block(default_ws);
+        if (err_is_fail(err) && err != LIB_ERR_NO_EVENT) {
             DEBUG_ERR(err, "in event_dispatch");
             abort();
         }
@@ -517,7 +518,7 @@ bsp_main(int argc, char *argv[]) {
         err = ump_receive(get_channel_for_core_to_monitor(i, 0), &payload);
 
         if (err == SYS_ERR_OK) {
-            debug_printf("UMP message received from core %d\n", i);
+            debug_printf("??UMP message received from core %d\n", i);
             debug_printf("Message type: %d, Core: %d\n", payload.type, payload.core);
 
             switch (payload.type) {
@@ -533,7 +534,7 @@ bsp_main(int argc, char *argv[]) {
                     }
 
                     debug_printf("Successfully spawned a process with PID %d on core %d\n", pid, payload.core);
-                    thread_yield();  // Allow other threads to execute
+                    //thread_yield();  // Allow other threads to execute
                     break;
 
                 default:
@@ -551,11 +552,9 @@ bsp_main(int argc, char *argv[]) {
 
     }
 
-    // spawn the shell
-    domainid_t shell_pid;
-    proc_mgmt_spawn_with_cmdline("shell", 0, &shell_pid);
 
-    return main_loop(get_default_waitset());
+
+    //return main_loop(get_default_waitset());
 
     return EXIT_SUCCESS;
 }
@@ -701,6 +700,7 @@ app_main(int argc, char *argv[]) {
     }
 
     struct waitset *default_ws = get_default_waitset();
+    
     while (true) {
         err = event_dispatch_non_block(default_ws);
 
@@ -709,6 +709,7 @@ app_main(int argc, char *argv[]) {
             abort();
         }
 
+        dmb();
         // check for a UMP message
         struct ump_payload payload;
         err = ump_receive(get_channel_for_current_core(1), &payload);
@@ -722,7 +723,7 @@ app_main(int argc, char *argv[]) {
                         abort();
                     }
                     debug_printf("succrssfully spawn a process in app_main\n");
-                    thread_yield();
+                    //thread_yield();
                     break;
                 default:
                     debug_printf("received unknown UMP message type\n");

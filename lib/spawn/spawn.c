@@ -155,12 +155,11 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     int argc;  // `argc` is declared without being initialized
     //char *buf;  // `buf` is initialized to NULL
     //char **argv = make_argv(name, &argc, &buf);
-    char* strings = (char *)multiboot_module_opts(module);
     const char *argv[MAX_CMDLINE_ARGS];
-    argv[0] = strings;
+    argv[0] = name;
 
 
-    err = parse_args(strings, &argc, (char **)argv);
+    err = parse_args(name, &argc, (char **)argv);
     if (err_is_fail(err)) {
         debug_printf("Error: Failed to parse arguments from command line\n");
         return err;
@@ -172,13 +171,6 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     for (int i = 0; i < argc; i++) {
         printf("argv[%d]: %s\n", i, argv[i]);
     }
-
-    // Allocate and copy the binary name
-    // si->binary_name = malloc(strlen((char*)argv[0]) + 1);
-    // if (si->binary_name == NULL) {
-    //     debug_printf("malloc failed\n");
-    //     abort();
-    // }
 
     char binary_name[MAX_BINARY_NAME_LENGTH];
 

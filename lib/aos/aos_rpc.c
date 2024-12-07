@@ -300,11 +300,14 @@ struct ump_chan *get_channel_for_current_core(int direction) {
 
 // reset pointers and zero out a struct ump_chan
 errval_t ump_chan_init(struct ump_chan *chan, size_t base) {
+    if (chan->init_flag != 1) {
+    chan->init_flag = 1;
     chan->base = base;
     chan->head = 0;
     chan->tail = 0;
     chan->size = BASE_PAGE_SIZE;
     memset((void *)((genvaddr_t)chan + (genvaddr_t)chan->base), 0, BASE_PAGE_SIZE);
+    } 
     return SYS_ERR_OK;
 }
 
