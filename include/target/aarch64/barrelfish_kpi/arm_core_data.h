@@ -162,7 +162,7 @@ struct armv8_core_data {
 STATIC_ASSERT(sizeof(struct armv8_core_data) < 4096,
         "Core Data structure must not exceed page size");
 
-#define ARMV8_CORE_DATA_PAGES 1200
+#define ARMV8_CORE_DATA_PAGES 3000
 
 
 #endif

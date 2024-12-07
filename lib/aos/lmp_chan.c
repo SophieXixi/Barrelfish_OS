@@ -102,6 +102,7 @@ errval_t lmp_chan_accept(struct lmp_chan *lc,
     /* mark connected */
     lc->connstate = LMP_CONNECTED;
     return SYS_ERR_OK;
+
 }
 
 /**

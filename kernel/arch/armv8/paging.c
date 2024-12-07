@@ -563,15 +563,15 @@ caps_map_l3(struct capability* dest,
     lvaddr_t dest_lvaddr = local_phys_to_mem(dest_lpaddr);
 
     union armv8_ttable_entry *entry = (union armv8_ttable_entry *)dest_lvaddr + slot;
-    printf("Starting to map %zu page table entries at virtual address: 0x%lx\n", pte_count, (uintptr_t)dest_lvaddr);
+    //printf("Starting to map %zu page table entries at virtual address: 0x%lx\n", pte_count, (uintptr_t)dest_lvaddr);
     for (size_t i = 0; i < pte_count; i++) {
         if (entry[i].d.valid) {
-            printf("ARMv8 L3 @ 0x%lx: slot %zu already in use\n",
-                        (uintptr_t)dest_lvaddr, slot + i);
+            //printf("ARMv8 L3 @ 0x%lx: slot %zu already in use\n",
+                        // (uintptr_t)dest_lvaddr, slot + i);
             return SYS_ERR_VNODE_SLOT_INUSE;
         } else {
-            printf("ARMv8 L3 @ 0x%lx: slot %zu available\n",
-                        (uintptr_t)dest_lvaddr, slot + i);
+            //printf("ARMv8 L3 @ 0x%lx: slot %zu available\n",
+                        // (uintptr_t)dest_lvaddr, slot + i);
         }
     }
     uint64_t start_vaddr = dest_lvaddr + (slot * BASE_PAGE_SIZE);

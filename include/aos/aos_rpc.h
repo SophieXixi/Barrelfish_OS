@@ -18,6 +18,8 @@
 
 #include <aos/aos.h>
 
+#define MOD_NAME_MAX_NUM 32
+#define MOD_NAME_LEN 64
 
 /// defines the transport backend of the RPC channel
 enum aos_rpc_transport {
@@ -25,13 +27,15 @@ enum aos_rpc_transport {
     AOS_RPC_UMP,
 };
 
-
 /// type of the receive handler function.
 /// depending on your RPC implementation, maybe you want to slightly adapt this
-typedef void (*aos_recv_handler_fn)(struct aos_rpc *ac);
+typedef void (*aos_recv_handler_fn)(void *arg);
 
+// global receive handler
+void gen_recv_handler(void *arg);
+#define MAX_PROC_PAGES 1 << 16   // 256 mib (65536 pages)
 
-
+void send_exit_handler(void * arg);
 
 /**
  * @brief represents an RPC binding
@@ -40,22 +44,120 @@ typedef void (*aos_recv_handler_fn)(struct aos_rpc *ac);
  */
 
 struct aos_rpc {
-    // TODO(M3): Add state
+    struct lmp_chan *channel;          // LMP channel for communication
+    struct capref remote_cap;         // Capability to the remote endpoint
+    struct waitset *ws;               // Waitset for non-blocking communication
+    bool waiting_for_reply;           // Flag to indicate waiting for a reply
+    domainid_t pid;
+};
+
+struct aos_rpc_num_payload {
+    struct aos_rpc *rpc;
+    uintptr_t val;
+};
+
+struct aos_rpc_cmdline_payload {
+    struct aos_rpc   *rpc;
+    struct capref     frame;
+           size_t     len;
+           coreid_t   core;
+           domainid_t pid;
+};
+
+struct aos_rpc_ram_cap_resp_payload {
+    struct aos_rpc *rpc;
+    struct capref ret_cap;
+    size_t ret_bytes;
+};
+
+struct aos_rpc_string_payload {
+    struct aos_rpc *rpc;
+    struct capref frame;
+    size_t len;
+};
+
+errval_t aos_rpc_init(struct aos_rpc *rpc);
+void setup_receive_handler(struct aos_rpc *rpc);
+void receive_number_handler(void *arg);
+void initialize_send_handler(void *arg);
+void init_acknowledgment_handler(void *arg);
+
+enum msg_type {
+    ACK_MSG,
+    SETUP_MSG,
+    NUM_MSG,
+    STRING_MSG,
+    NAME_MSG,
+    PUTCHAR,
+    GETCHAR,
+    GETCHAR_ACK,
+    GET_RAM_CAP,
+    SPAWN_CMDLINE,
+    PID_ACK,
+    RAM_CAP_ACK,
+    GET_ALL_PIDS,
+    GET_MOD_NAMES,
+    GET_PID,
+    EXIT_MSG,
+    WAIT_MSG,
+    SPAWN_WITH_CAPS_MSG,
+};
+
+struct aos_rpc_ram_cap_req_payload {
+    struct aos_rpc *rpc;
+    size_t bytes;
+    size_t alignment;
+};
+
+
+
+struct ump_chan *get_channel_for_core_to_monitor(coreid_t core_id, int direction);
+struct ump_chan *get_channel_for_current_core(int direction);
+errval_t ump_chan_init(struct ump_chan *chan, size_t base);
+errval_t ump_send(struct ump_chan *chan, char *buf, size_t size);
+errval_t ump_receive(struct ump_chan *chan, void *buf);
+
+
+/**
+circular buffer for inter-core communication in a shared memory region
+
+head pointer: Tracks the position where the next write operation (e.g., send) will occur. 
+This is managed by the sender.
+
+tail pointer: Tracks the position where the next read operation (e.g., receive) will occur.
+This is managed by the receiver.
+
+This is an array of cache linze-sized slots
+ */
+struct ump_chan {
+    size_t base;  // offset of base from struct ump_chan
+    size_t head;  // offset of head from base
+    size_t tail;  // offset of tail from base
+    size_t size;  // size of the buffer
 };
 
 /**
- * @brief Initialize an aos_rpc struct.
- *
- * @param[in] rpc  The aos_rpc struct to initialize.
- *
- * @returns SYS_ERR_OK on success, or error value on failure
+ * Each 'slot' in the circular buffer corresponds to a struct cache_line
  */
-errval_t aos_rpc_init(struct aos_rpc *rpc);
+struct cache_line {
+    char payload[56];
+    uint32_t valid;
+};
 
+struct ump_payload {
+    enum msg_type type;
+    coreid_t core;
+    char payload[56 - sizeof(enum msg_type) - sizeof(coreid_t)];
+};
 
-
-
-
+struct spawn_with_caps_frame_input {
+    int argc;
+    char argv[8][8];
+    int capc;
+    struct capref cap;
+    coreid_t core;
+    domainid_t pid;
+};
 
 /*
  * ------------------------------------------------------------------------------------------------

@@ -12,9 +12,14 @@
 
 #define ARMv8_KERNEL_OFFSET 0xffff000000000000
 
+#define NEW_CORE_MEM_SZ 1024 * 1024 * 256     // 256 mib
 
 extern struct platform_info platform_info;
 extern struct bootinfo     *bi;
+const char *global_cpu_driver;
+const char *global_init;
+
+extern genvaddr_t global_urpc_frames[4];
 
 struct mem_info {
     size_t   size;       // Size in bytes of the memory region
@@ -183,7 +188,232 @@ __attribute__((__used__)) static errval_t relocate_elf(genvaddr_t binary, struct
     return SYS_ERR_OK;
 }
 
+static errval_t allocate_and_map_frame(struct capref *frame, size_t size, void **buf, uint64_t flags) {
+    errval_t err = frame_alloc(frame, size, NULL);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't allocate frame of size %zu\n", size);
+        return err;
+    }
 
+    err = paging_map_frame_attr(get_current_paging_state(), buf, size, *frame, flags);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't map frame into virtual memory\n");
+        return err;
+    }
+    return SYS_ERR_OK;
+}
+
+// Helper function to allocate RAM and identify its capability
+static errval_t allocate_and_identify_ram(struct capref *ram, size_t size, struct capability *cap) {
+    errval_t err = ram_alloc(ram, size);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't allocate RAM of size %zu\n", size);
+        return err;
+    }
+
+    err = cap_direct_identify(*ram, cap);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't identify RAM capability\n");
+        return err;
+    }
+    return SYS_ERR_OK;
+}
+
+// Helper function to set up a memory region from a capability
+static struct armv8_coredata_memreg setup_memory_region(struct capability cap) {
+    struct armv8_coredata_memreg mem;
+    mem.base = cap.u.ram.base;
+    mem.length = cap.u.ram.bytes;
+    return mem;
+}
+
+/**
+ * @brief Allocates and retypes a KCB (Kernel Control Block) capability.
+ *
+ * @param[out] kcb_capref         Pointer to the slot where the KCB capability will be stored.
+ * @param[out] kcb_ram_capability Pointer to the capability structure that will store the identified RAM capability.
+ *
+ * @return SYS_ERR_OK on success, or an error value on failure.
+ */
+static errval_t allocate_and_retype_kcb(struct capref *kcb_capref, struct capability *kcb_ram_capability) {
+    errval_t err;
+
+    // Step 1: Allocate aligned RAM for the KCB using helper function
+    struct capref kcb_ram_capref;
+    err = allocate_and_identify_ram(&kcb_ram_capref, OBJSIZE_KCB, kcb_ram_capability);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't allocate and identify RAM for KCB\n");
+        return err;
+    }
+
+    // Step 2: Allocate a slot for the KCB
+    err = slot_alloc(kcb_capref);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't allocate slot for KCB\n");
+        return err;
+    }
+
+    debug_printf("retype ram to kvb\n");
+    // Step 3: Retype the allocated RAM capability into a KCB capability
+    err = cap_retype(*kcb_capref, kcb_ram_capref, 0, ObjType_KernelControlBlock, OBJSIZE_KCB);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't retype RAM capability into KCB capability\n");
+        return err;
+    }
+
+    // Debug output for the KCB's base address and size
+    debug_printf("KCB base!!!: %p, size: %lu\n", kcb_ram_capability->u.ram.base, kcb_ram_capability->u.ram.bytes);
+
+    return SYS_ERR_OK;
+}
+
+
+/**
+ * @brief Loads, maps, and relocates a driver ELF binary.
+ *
+ * @param[in]  driver_name          The name of the driver (e.g., "CPU driver" or "boot driver").
+ * @param[in]  driver_path          Path to the driver binary.
+ * @param[in]  entry_symbol         Entry point symbol name in the ELF binary.
+ * @param[out] reloc_entry_point    Relocated entry point of the ELF binary.
+ * @param[out] mi                   Memory info structure for the ELF binary.
+ * @param[in]  relocation_offset    The offset for relocation (0 for boot driver, ARMV8_KERNEL_OFFSET for CPU driver).
+ *
+ * @return SYS_ERR_OK on success, or an error value on failure.
+ */
+static errval_t load_map_relocate_driver(const char *driver_name, const char *driver_path, 
+                                         const char *entry_symbol, genvaddr_t *reloc_entry_point, 
+                                         struct mem_info *mi, genvaddr_t relocation_offset) 
+{
+    errval_t err;
+
+    // Find the driver module and get its frame
+    struct mem_region *driver_mr = multiboot_find_module(bi, driver_path);
+    if (driver_mr == NULL) {
+        debug_printf("Couldn't find %s module\n", driver_name);
+        return -1;
+    }
+    
+    struct capref driver_frame = {
+        .cnode = cnode_module,
+        .slot = driver_mr->mrmod_slot,
+    };
+
+    // Get the size of the driver frame by identifying the capability
+    struct capability driver_cap;
+    err = cap_direct_identify(driver_frame, &driver_cap);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't identify frame for %s\n", driver_name);
+        return err;
+    }
+    size_t driver_bytes = driver_cap.u.frame.bytes;
+
+    // Map the driver frame
+    void *driver_buf;
+    err = paging_map_frame_attr(get_current_paging_state(), &driver_buf, driver_bytes, 
+                                driver_frame, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't map %s frame\n", driver_name);
+        return err;
+    }
+
+    // Allocate and map a new frame for the ELF binary
+    struct capref driver_elf_frame;
+    void *driver_elf_buf;
+    err = allocate_and_map_frame(&driver_elf_frame, driver_bytes, &driver_elf_buf, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't allocate and map %s ELF frame\n", driver_name);
+        return err;
+    }
+
+    // Identify the ELF frame capability and set up the memory info
+    struct capability driver_elf_cap;
+    err = cap_direct_identify(driver_elf_frame, &driver_elf_cap);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't identify %s ELF frame capability\n", driver_name);
+        return err;
+    }
+    mi->buf = driver_elf_buf;
+    mi->phys_base = driver_elf_cap.u.ram.base;
+    mi->size = driver_bytes;
+
+    // Get the physical entry point of the ELF binary
+    struct Elf64_Sym *entry = elf64_find_symbol_by_name((genvaddr_t)driver_buf, driver_bytes, 
+                                                        entry_symbol, 0, STT_FUNC, NULL);
+    if (entry == NULL) {
+        debug_printf("Couldn't find %s entry point symbol\n", entry_symbol);
+        return -1;
+    }
+    genvaddr_t phys_entry_point = entry->st_value;
+
+    // Load the ELF binary into the ELF binary frame
+    err = load_elf_binary((genvaddr_t)driver_buf, mi, phys_entry_point, reloc_entry_point);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't load %s binary\n", driver_name);
+        return err;
+    }
+
+    // Relocate the ELF binary
+    err = relocate_elf((genvaddr_t)driver_buf, mi, relocation_offset);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't relocate %s\n", driver_name);
+        return err;
+    }
+
+    return SYS_ERR_OK;
+}
+
+
+
+// Helper function to initialize the core data structure
+static void initialize_core_data_struct(struct armv8_core_data *coreData, struct capability stack_cap,
+                                        struct armv8_coredata_memreg initProcess_mem,
+                                        struct armv8_coredata_memreg urpc_mem,
+                                        struct armv8_coredata_memreg monitor_binary,
+                                        genvaddr_t cpu_reloc_entry_point, coreid_t mpid,
+                                        struct capability kcb_ram_capref) {
+    coreData->boot_magic = ARMV8_BOOTMAGIC_PSCI;
+    coreData->cpu_driver_stack = stack_cap.u.ram.base + stack_cap.u.ram.bytes;
+    coreData->cpu_driver_stack_limit = stack_cap.u.ram.base;
+    coreData->cpu_driver_entry = cpu_reloc_entry_point + ARMv8_KERNEL_OFFSET;
+    memset(coreData->cpu_driver_cmdline, 0, sizeof(coreData->cpu_driver_cmdline));
+
+    // Set memory regions
+    coreData->memory = initProcess_mem;
+    coreData->urpc_frame = urpc_mem;
+    coreData->monitor_binary = monitor_binary;
+    coreData->kcb = kcb_ram_capref.u.ram.base;
+
+    // Set core and architecture identifiers
+    coreData->src_core_id = disp_get_core_id();
+    coreData->dst_core_id = mpid;
+    coreData->src_arch_id = disp_get_core_id();
+    coreData->dst_arch_id = mpid;
+}
+
+// Helper to initialize a memory region based on a capability
+static struct mem_region initialize_mem_region(struct capability cap, enum region_type type) {
+    struct mem_region region;
+    region.mr_base = cap.u.ram.base;
+    region.mr_type = type;
+    region.mr_bytes = cap.u.ram.bytes;
+    region.mr_consumed = 0;
+    region.mrmod_size = 0;
+    region.mrmod_data = 0;
+    region.mrmod_slot = 0;
+    return region;
+}
+
+// Helper to copy module regions to the new bootinfo structure
+static size_t copy_module_regions(struct bootinfo *new_core_bootinfo, struct bootinfo *bootinfo, int start_index) {
+    size_t j = start_index;
+    for (size_t i = 0; i < bootinfo->regions_length; i++) {
+        if (bootinfo->regions[i].mr_type == RegionType_Module) {
+            new_core_bootinfo->regions[j] = bootinfo->regions[i];
+            j++;
+        }
+    }
+    return j; // Return the next available index
+}
 
 
 /**
@@ -200,14 +430,6 @@ __attribute__((__used__)) static errval_t relocate_elf(genvaddr_t binary, struct
 errval_t coreboot_boot_core(hwid_t mpid, const char *boot_driver, const char *cpu_driver,
                             const char *init, coreid_t *core)
 {
-    // make compiler happy about unused parameters
-    (void)init;
-    (void)boot_driver;
-    (void)cpu_driver;
-    // make compiler happy about unused parameters
-    (void)core;
-    (void)mpid;
-
     // Implement me!
     // - Get a new KCB by retyping a RAM cap to ObjType_KernelControlBlock.
     //   Note that it should at least OBJSIZE_KCB, and it should also be aligned
@@ -227,9 +449,194 @@ errval_t coreboot_boot_core(hwid_t mpid, const char *boot_driver, const char *cp
     // - Call the invoke_monitor_spawn_core with the entry point
     //   of the boot driver and pass the (physical, of course) address of the
     //   boot struct as argument.
+    errval_t err;
 
-    debug_printf("WARNING: Spawning cores not yet implemented on this platform.\n");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    global_cpu_driver = cpu_driver;
+    global_init = init;
+
+
+    /**
+     *  Step 1: 
+        Get a new KCB(kernal control block) by retyping a RAM cap to ObjType_KernelControlBlock.
+        Note that it should at least OBJSIZE_KCB, and it should also be aligned
+        to a multiple of 16k.
+     */
+
+    // This is for KCB that needs to retype later
+    struct capref kcb_capref;
+
+    // Represents a chunk of raw RAM
+    struct capability kcb_ram_capref;
+    err = allocate_and_retype_kcb(&kcb_capref, &kcb_ram_capref);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    /**
+     *  Step2: Load and relocate the Boot and CPU driver
+        Relocate the boot and CPU driver. The boot driver runs with a 1:1
+        VA->PA mapping. The CPU driver is expected to be loaded at the
+        high virtual address space, at offset ARMV8_KERNEL_OFFSET.
+
+        It is the boot driver starts the initializtion and then cpu driver take over. 
+        Need to relocate so they can excute from their designated memory region
+     */
+    struct mem_info cpu_mi, boot_mi;
+    genvaddr_t cpu_reloc_entry_point, boot_reloc_entry_point; // need this in invoke_monitor_spawn_core later
+
+    // Load, map, and relocate CPU driver and particularlly relocate to the ARMv8_KERNEL_OFFSET
+    // Here, we search the "arch_init" to find the entry point. 
+    err = load_map_relocate_driver("CPU driver", cpu_driver, "arch_init", 
+                                   &cpu_reloc_entry_point, &cpu_mi, ARMv8_KERNEL_OFFSET);
+    if (err_is_fail(err)) {
+        return err;
+    }
+
+    // Load, map, and relocate boot driver. Search same as above
+    err = load_map_relocate_driver("boot driver", boot_driver, "boot_entry_psci", 
+                                   &boot_reloc_entry_point, &boot_mi, 0);
+    if (err_is_fail(err)) {
+        return err;
+    }
+    
+
+    // Step 3: allocate memory for coreData and the stack
+
+    // Allocate and map the core data frame
+    // CoreData will be used to manage the new core
+    struct capref coreData_frame;
+    void *coreData_buf;
+    err = allocate_and_map_frame(&coreData_frame, BASE_PAGE_SIZE, &coreData_buf, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) return err;
+    struct armv8_core_data *coreData = (struct armv8_core_data *)coreData_buf;
+
+    // Identify the capability of the core data frame (coreData_cap)
+    struct capability coreData_cap;
+    err = cap_direct_identify(coreData_frame, &coreData_cap);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't identify core data frame capability\n");
+        return err;
+    }
+
+    // Allocate RAM for the stack and identify its capability
+    struct capref stack_ram;
+    struct capability stack_cap;
+    err = allocate_and_identify_ram(&stack_ram, 16 * BASE_PAGE_SIZE, &stack_cap);
+    if (err_is_fail(err)) return err;
+
+
+    // Step 4: Read to fill in the core data struct
+    // Locate the init binary module
+    struct mem_region *init_binary_region = multiboot_find_module(bi, init);
+    if (init_binary_region == NULL) {
+        debug_printf("Couldn't find init module\n");
+        return -1;
+    }
+
+    // Define memory region for the monitor binary
+    struct armv8_coredata_memreg monitor_binary = {
+        .base = init_binary_region->mr_base,
+        .length = init_binary_region->mrmod_size
+    };
+
+    // Allocate memory for the init process and identify its capability
+    struct capref initProcess_ram;
+    struct capability initProcess_cap;
+    size_t init_process_size = ARMV8_CORE_DATA_PAGES * BASE_PAGE_SIZE + ROUND_UP(monitor_binary.length, BASE_PAGE_SIZE);
+    err = allocate_and_identify_ram(&initProcess_ram, init_process_size, &initProcess_cap);
+    if (err_is_fail(err)) return err;
+    struct armv8_coredata_memreg initProcess_mem = setup_memory_region(initProcess_cap);
+
+    // Allocate and map URPC frame for inter-core communication
+    struct capref urpc_frame;
+    void *urpc_buf;
+    err = allocate_and_map_frame(&urpc_frame, 4 * BASE_PAGE_SIZE, &urpc_buf, VREGION_FLAGS_READ_WRITE);
+    if (err_is_fail(err)) return err;
+    global_urpc_frames[(uint64_t)mpid] = (genvaddr_t)urpc_buf;
+
+    // Identify the URPC frame capability and set base and length in urpc_mem
+    struct capability urpc_cap;
+    err = cap_direct_identify(urpc_frame, &urpc_cap);
+    if (err_is_fail(err)) return err;
+    struct armv8_coredata_memreg urpc_mem = setup_memory_region(urpc_cap);
+
+    // Populate the core data structure with relevant information
+    initialize_core_data_struct(coreData, stack_cap, initProcess_mem, urpc_mem, 
+                                monitor_binary, cpu_reloc_entry_point, mpid, kcb_ram_capref);
+
+    
+    // vscode doesn't like this cast, but the compiler requires it
+    cpu_dcache_wbinv_range((vm_offset_t)coreData_buf, BASE_PAGE_SIZE);
+
+
+    // Allocate RAM for the new core (256 MB)
+    struct capref new_core_ram;
+    struct capability new_core_ram_cap;  // Define the capability to hold identified RAM details
+    err = allocate_and_identify_ram(&new_core_ram, NEW_CORE_MEM_SZ, &new_core_ram_cap);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't allocate RAM for new core\n");
+        return err;
+    }
+
+    // Get capability for module strings which contain metadata
+    struct capability mod_strings_cap;
+    err = cap_direct_identify(cap_mmstrings, &mod_strings_cap);
+    if (err_is_fail(err)) {
+        debug_printf("Couldn't identify capability for module strings\n");
+        return err;
+    }
+
+    // Initialize the new bootinfo struct for the other core
+    struct mem_region new_mem_region = initialize_mem_region(new_core_ram_cap, RegionType_Empty);
+
+    // Count all ELF module regions
+    size_t module_counter = 0;
+    for (size_t i = 0; i < bi->regions_length; i++) {
+        if (bi->regions[i].mr_type == RegionType_Module) {
+            module_counter++;
+        }
+    }
+
+    int bootinfo_size = sizeof(struct bootinfo) + ((module_counter + 1) * sizeof(struct mem_region));
+    struct bootinfo *new_core_bootinfo = (struct bootinfo *)malloc(bootinfo_size);
+    if (new_core_bootinfo == NULL) {
+        debug_printf("Memory allocation for new core bootinfo failed\n");
+        return -1;
+    }
+
+    // Populate the new core bootinfo structure
+    new_core_bootinfo->regions[0] = new_mem_region;
+    new_core_bootinfo->regions_length = module_counter + 1;
+    new_core_bootinfo->mem_spawn_core = bi->mem_spawn_core;
+
+    // Copy existing module regions to the new core bootinfo structure
+    copy_module_regions(new_core_bootinfo, bi, 1);
+
+    // Copy the bootinfo to the URPC buffer and flush cache
+    memcpy(urpc_buf, new_core_bootinfo, bootinfo_size);
+    memcpy(urpc_buf + bootinfo_size, &(mod_strings_cap.u.frame.base), sizeof(genpaddr_t));
+    memcpy(urpc_buf + bootinfo_size + sizeof(genpaddr_t), &(mod_strings_cap.u.frame.bytes), sizeof(gensize_t));
+    cpu_dcache_wbinv_range((vm_offset_t)urpc_buf, BASE_PAGE_SIZE);
+
+    // Clean up allocated memory
+    free(new_core_bootinfo);
+
+
+    /**
+     *  Call the invoke_monitor_spawn_core with the entry point
+        of the boot driver and pass the (physical, of course) address of the
+        boot struct as argument.
+     */
+
+    // Fix the CPU type to CPU_ARM8
+    err = invoke_monitor_spawn_core(coreData->dst_arch_id, CPU_ARM8, boot_reloc_entry_point, coreData_cap.u.frame.base, 0);
+
+    // set the return core parameter
+    if (core != NULL) {
+        *core = (coreid_t)mpid;
+    }
+
+    return SYS_ERR_OK;
 }
 
 /**

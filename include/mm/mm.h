@@ -26,27 +26,23 @@
 __BEGIN_DECLS
 
 
-//track free blocks of memory that are available for allocation
-struct free_list {
-    struct mm_node *head;     
-};
-
-
-// Node in the free list (meta-data)
-struct mm_node {
-    size_t size;                  // Size of the free memory block
-    uintptr_t base_addr;          // Base address of the free memory block
-    struct mm_node *next;         // Pointer to the next node in the free list
-    struct mm_node *prev;         // Pointer to the prev node in the free list
-    bool used;                    // whether or not this data is in use
-    struct capref cap;              
-    size_t offset;
-    uintptr_t capability_base;
-};
-
-
 /// type of the slot allocator refill function
 typedef errval_t (*slot_alloc_refill_fn_t)(struct slot_allocator *ca);
+
+/**
+ *@brief Linked list element for capability linked list
+ */
+struct metadata {
+    genpaddr_t base;             // the base address for this data
+    size_t size;                 // the size of this data
+    bool used;                   // whether or not this data is in use
+    struct metadata *prev;       // the previous node in a doubly-linked list
+    struct metadata *next;       // the next node in a doubly-linked list
+    struct capref capability;    // the original capability
+    genpaddr_t capability_base;  // the base address of the original capability
+};
+
+#define NumStructAlloc 1024
 
 /**
  * @brief Memory manager instance data
@@ -55,19 +51,18 @@ typedef errval_t (*slot_alloc_refill_fn_t)(struct slot_allocator *ca);
  * them to allocate its memory, we declare it in the public header.
  */
 struct mm {
-    struct slot_allocator *ca;       ///< Slot allocator used for allocating nodes
-    slot_alloc_refill_fn_t refill;   ///< Function to refill the slot allocator
-    enum objtype           objtype;  ///< Type of capabilities stored
-    // TODO: add your own fields here to track the use of memory etc.
-    
-    // This is for the Memory tracking
-    size_t total_memory;             ///< Total memory managed by this instance
-    size_t avaliable_memory;         ///< Free memory currently available
-   
-    struct free_list free_list;
-    struct slab_allocator slab_allocator;
-    bool mm_refilling_flag;
+    struct slot_allocator *ca;      ///< Slot allocator used for allocating nodes
+    slot_alloc_refill_fn_t refill;  ///< Function to refill the slot allocator
+    struct slab_allocator ma;       ///< Slab allocator for metadata
+    char slab_buf[SLAB_STATIC_SIZE(NumStructAlloc, sizeof(struct metadata))];             // TODO: dynamically allocate a buffer 
+    struct metadata *freelist;      ///< Pointer to the first element of the metadata linked list
+    enum objtype objtype;           ///< Type of capabilities stored
+    size_t free_mem;                ///< Bytes of free memory
+    size_t total_mem;               ///< Total number of bytes managed
+    genpaddr_t base;                ///< The lowest starting address of any chunk of memory
+    size_t limit;                   ///< The highest ending address of any chunk of memory
 };
+
 
 
 /**
@@ -84,7 +79,7 @@ struct mm {
  *  - @retval SYS_ERR_OK if the memory manager was successfully initialized
  */
 errval_t mm_init(struct mm *mm, enum objtype objtype, struct slot_allocator *ca,
-                 slot_alloc_refill_fn_t refill, void *slabƒr_buf, size_t slab_sz)
+                 slot_alloc_refill_fn_t refill, void *slab_buf, size_t slab_sz)
     __attribute__((warn_unused_result));
 
 
@@ -177,7 +172,7 @@ errval_t mm_alloc_aligned(struct mm *mm, size_t size, size_t alignment, struct c
 static inline errval_t mm_alloc(struct mm *mm, size_t size, struct capref *retcap)
     __attribute__((warn_unused_result));
 static inline errval_t mm_alloc(struct mm *mm, size_t size, struct capref *retcap)
-{ 
+{
     return mm_alloc_aligned(mm, size, BASE_PAGE_SIZE, retcap);
 }
 
@@ -303,11 +298,12 @@ size_t mm_mem_total(struct mm *mm);
  */
 void mm_mem_get_free_range(struct mm *mm, lpaddr_t *base, lpaddr_t *limit);
 
-
-// Prototype for functions below
-void free_list_init(struct free_list *list);;
-errval_t insertNode_free_list(struct mm *mm, struct free_list *list, size_t size, uintptr_t base_addr, struct capref cap, genpaddr_t capability_base);
-bool is_power_of_two(size_t x);
+/**
+ * @brief print all blocks managed by allocator
+ *
+ * @param[in] mm   memory manager instance to query
+ */
+void mm_print_map(struct mm *mm);
 
 __END_DECLS
 

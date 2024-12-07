@@ -25,12 +25,17 @@
 #include <aos/paging.h>
 #include <aos/morecore.h>
 #include <aos/morecore.h>
-
+#include <aos/aos_rpc.h>
 
 
 #define HEAP_ALLOC_SIZE (256 << 10)
 
 #define HEAP_ALLOC_SIZE (256 << 10)
+
+#define MAX_BINARY_NAME_LENGTH 256
+
+// Declare a static or stack-allocated array
+
 
 
 
@@ -62,8 +67,30 @@ __attribute__((__used__)) static void armv8_set_registers(dispatcher_handle_t ha
     disabled_area->regs[REG_OFFSET(PIC_REGISTER)] = got_base;
     disabled_area->named.pc                       = entry;
 }
+static errval_t parse_args(const char *cmdline, int *argc, char *argv[]);
+static errval_t parse_args(const char *cmdline, int *argc, char *argv[])
+{
+    // check if we have at least one argument
+    if (argv == NULL || argv[0] == NULL || argc == NULL || cmdline == NULL) {
+        return CAPS_ERR_INVALID_ARGS;
+    }
 
+    // parse cmdline, split on spaces
+    char cmdline_ptr[MAX_CMDLINE_ARGS + 1];
+    strncpy(cmdline_ptr, cmdline, strlen(cmdline) + 1);
+    char *token = strtok(cmdline_ptr, " ");
+    int i = 0;
+    *argc = 0;
 
+    while (token != NULL && i < MAX_CMDLINE_ARGS) {
+        argv[i++] = token;
+        (*argc)++;
+        token = strtok(NULL, " ");
+    }
+    argv[i] = NULL;
+
+    return SYS_ERR_OK;
+}
 
 
 /**
@@ -115,6 +142,7 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     si->child_frame_id = child_frame_id;
     si->mapped_elf = mapped_elf;
     si->module = module;
+
     // - create the elfimg struct from the module
     struct elfimg img;
     elfimg_init_from_module(&img, module);
@@ -125,12 +153,19 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     // - Fill in argc/argv from the multiboot command line
     //const char *cmdline = multiboot_module_opts(module);
     int argc;  // `argc` is declared without being initialized
-    char *buf = NULL;  // `buf` is initialized to NULL
-    char **argv = make_argv(name, &argc, &buf);
-    if (!argv) {
+    //char *buf;  // `buf` is initialized to NULL
+    //char **argv = make_argv(name, &argc, &buf);
+    char* strings = (char *)multiboot_module_opts(module);
+    const char *argv[MAX_CMDLINE_ARGS];
+    argv[0] = strings;
+
+
+    err = parse_args(strings, &argc, (char **)argv);
+    if (err_is_fail(err)) {
         debug_printf("Error: Failed to parse arguments from command line\n");
-        return SPAWN_ERR_CREATE_ARGSPG;
+        return err;
     }
+
     printf("Created arguments argc = %d\n", argc);
 
     // Print out each argument to verify
@@ -139,12 +174,16 @@ errval_t spawn_load_with_bootinfo(struct spawninfo *si, struct bootinfo *bi, con
     }
 
     // Allocate and copy the binary name
-    si->binary_name = malloc(strlen((char*)argv[0]) + 1);
-    if (si->binary_name == NULL) {
-        debug_printf("malloc failed\n");
-        abort();
-    }
-    strcpy(si->binary_name, (char*) argv[0]);
+    // si->binary_name = malloc(strlen((char*)argv[0]) + 1);
+    // if (si->binary_name == NULL) {
+    //     debug_printf("malloc failed\n");
+    //     abort();
+    // }
+
+    char binary_name[MAX_BINARY_NAME_LENGTH];
+
+    strcpy(binary_name, (char*) argv[0]);
+    si->binary_name = binary_name;
     printf("BINARY NAME: %s\n", si->binary_name);
 
 
@@ -257,6 +296,7 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
         debug_printf("Failed to load ELF: %s\n", err_getstring(err));
         return err;
     }
+    
     printf("LOADED THE ELF");
 
     // step 5: set up the dispatcher
@@ -266,7 +306,14 @@ errval_t spawn_load_with_caps(struct spawninfo *si, struct elfimg *img, int argc
     // step 6: setup the environment
     setup_args(si, argc, argv);
 
-    
+    // Add this call after setting up the arguments (setup_args) but before returning:
+    err = spawn_setup_ipc(si, get_default_waitset(), (aos_recv_handler_fn) gen_recv_handler);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to set up IPC: %s\n", err_getstring(err));
+        return err;
+    }
+
+
     return SYS_ERR_OK;
 }
 
@@ -282,6 +329,7 @@ static errval_t initialize_spawn_info(struct spawninfo *si, const char *binary_n
     si->exitcode = 0;
     si->children = NULL;
     si->num_children = 0;
+    si->pages_allocated = 256;
     printf("Initialized spawninfo for PID %u with binary %s\n", pid, si->binary_name);
     return SYS_ERR_OK;
 }
@@ -341,26 +389,6 @@ static errval_t setup_child_cspace(struct spawninfo *si)
     };
     err = cap_copy(si->taskcn_root, l1_cap);
 
-
-
-    // Step 7: Allocate ARGSPAGE and copy to child
-    // struct capref argspage;
-    // err = frame_alloc(&argspage, BASE_PAGE_SIZE, NULL);
-    // if (err_is_fail(err)) {
-    //     debug_printf("Failed to allocate ARGSPAGE: %s\n", err_getstring(err));
-    //     return err;
-    // }
-    // si->argspage_cap = (struct capref){
-    //     .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
-    //     .slot = TASKCN_SLOT_ARGSPAGE
-    // };
-    // err = cap_copy(si->argspage_cap, argspage);
-    // if (err_is_fail(err)) {
-    //     debug_printf("Failed to copy ARGSPAGE to child: %s\n", err_getstring(err));
-    //     return err;
-    // }
-
-
     struct capref earlymem_cap;
 
     err = ram_alloc(&earlymem_cap, BASE_PAGE_SIZE * 1024);
@@ -418,15 +446,12 @@ static errval_t setup_child_cspace(struct spawninfo *si)
                 si->earlymem_cap.cnode.croot, si->earlymem_cap.slot);
 
 
-
-
-
-if (err_is_fail(err)) {
-    debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
-    return err;
-} else {
-    debug_printf("EARLYMEM capability successfully copied to TASKCN_SLOT_EARLYMEM.\n");
-}
+    if (err_is_fail(err)) {
+        debug_printf("Failed to copy EARLYMEM to child: %s\n", err_getstring(err));
+        return err;
+    } else {
+        debug_printf("EARLYMEM capability successfully copied to TASKCN_SLOT_EARLYMEM.\n");
+    }
 
         printf("CSPACE setup for child completed.\n");
     return SYS_ERR_OK;
@@ -438,7 +463,12 @@ static errval_t initialize_child_vspace(struct spawninfo *si)
 {   
     (void)si;
     size_t bufsize = SINGLE_SLOT_ALLOC_BUFLEN(L2_CNODE_SLOTS);
-    void *buf = malloc(bufsize);
+    static char static_buf[SINGLE_SLOT_ALLOC_BUFLEN(L2_CNODE_SLOTS)];
+
+
+    printf("before buf malloc\n");
+    void *buf = static_buf;
+    printf("after buf malloc\n");
     assert(buf != NULL);
 
     printf("  &si->single_slot_alloc: %p\n", (void*)&si->single_slot_alloc);
@@ -553,12 +583,27 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
         return SPAWN_ERR_DISPATCHER_SETUP;
     }
 
-    struct capref selfep;
-    err = cap_retype(selfep, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+
+    // struct capref selfep;
+    // err = cap_retype(selfep, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+
+    // si->selfep_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
+    // si->selfep_cap.slot = TASKCN_SLOT_SELFEP;
+    // err = cap_copy(si->selfep_cap, selfep);
+    // if (err_is_fail(err)) {
+    //     printf("Failed to copy, %s\n");
+    // }
+
 
     si->selfep_cap.cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN];
     si->selfep_cap.slot = TASKCN_SLOT_SELFEP;
-    cap_copy(si->selfep_cap, selfep);
+    err = cap_retype(si->selfep_cap, dispatcher_parent, 0, ObjType_EndPointLMP, 0);
+
+    printf("Remote endpoint capability set SPAWN:\n");
+    printf("  cnode.croot = %u, cnode.cnode = %u, cnode.level = %u\n", 
+           si->selfep_cap.cnode.croot, si->selfep_cap.cnode.cnode, si->selfep_cap.cnode.level);
+    printf("  slot = %u\n", si->selfep_cap.slot);
+
 
     // Allocate dispatcher frame for parent
     struct capref dispframe_parent;
@@ -646,7 +691,6 @@ static errval_t setup_dispatcher(struct spawninfo *si, domainid_t pid)
     return SYS_ERR_OK;
 }
 
-// setup the args and the environment
 // setup the args and the environment
 static errval_t setup_args(struct spawninfo *si, int argc, const char *argv[])
 {
@@ -880,21 +924,100 @@ errval_t spawn_cleanup(struct spawninfo *si)
  * Hint: the IPC subsystem should be initialized before the process is being run for
  * the first time.
  */
-errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_handler_fn handler)
-{
-    // make compiler happy about unused parameters
-    (void)si;
-    (void)ws;
-    (void)handler;
+errval_t spawn_setup_ipc(struct spawninfo *si, struct waitset *ws, aos_recv_handler_fn handler) {
+    debug_printf("Entering spawn_setup_ipc...\n");
 
-    // TODO:
-    //  - initialize the messaging channels for the process
-    //  - check its execution state (it shouldn't have run yet)
-    //  - create the required capabilities if needed
-    //  - set the receive handler
-    USER_PANIC("Not implemented");
-    return LIB_ERR_NOT_IMPLEMENTED;
+    errval_t err;
+
+    // Check the execution state of the process
+    // debug_printf("Checking the process state...\n");
+    // if (si->state != SPAWN_STATE_READY) {
+    //     debug_printf("Process state is not READY. Current state: %d\n", si->state);
+    //     return SPAWN_ERR_LOAD;
+    // }
+    // debug_printf("Process state is READY.\n");
+
+    // Create the struct aos_rpc
+    debug_printf("Allocating memory for aos_rpc structure...\n");
+    struct aos_rpc *rpc = malloc(sizeof(struct aos_rpc));
+    if (rpc == NULL) {
+        debug_printf("Failed to allocate memory for aos_rpc structure.\n");
+        return SPAWN_ERR_LOAD;
+    }
+    debug_printf("Allocated memory for aos_rpc at address: %p\n", (void *)rpc);
+
+    // Initialize the RPC channel
+    debug_printf("Initializing the RPC channel...\n");
+    err = aos_rpc_init(rpc);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to initialize RPC channel: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
+        return err;
+    }
+    debug_printf("Successfully initialized the RPC channel.\n");
+
+
+
+    // Accept the LMP channel
+    debug_printf("Attempting to accept the LMP channel...\n");
+    err = lmp_chan_accept(rpc->channel, DEFAULT_LMP_BUF_WORDS, NULL_CAP);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to accept LMP channel: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
+        return err;
+    }
+    debug_printf("Successfully accepted the LMP channel.\n");
+
+    // Set up the child's init endpoint capability
+    struct capref child_init_endpoint = {
+        .cnode = si->l2_cnodes[ROOTCN_SLOT_TASKCN],
+        .slot = TASKCN_SLOT_INITEP
+    };
+   
+
+    // Copy the local capability of the LMP channel into the child's init endpoint slot
+    debug_printf("Copying local capability of LMP channel to child's init endpoint...\n");
+    debug_printf("Source cap: cnode = %u, slot = %u\n", rpc->channel->local_cap.cnode.cnode, rpc->channel->local_cap.slot);
+    debug_printf("Destination cap: cnode = %u, slot = %u\n", child_init_endpoint.cnode.cnode, child_init_endpoint.slot);
+    debug_print_cap_at_capref(rpc->channel->local_cap);
+
+     err = cap_copy(child_init_endpoint, rpc->channel->local_cap);
+
+
+   //err = cap_copy(child_init_endpoint, local_ep);
+    printf("create and copy endpoint\n");
+
+    if (err_is_fail(err)) {
+        debug_printf("Failed to copy local capability: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
+        return err_push(err, LIB_ERR_CAP_COPY);
+    }
+    debug_printf("Successfully copied local capability to child's init endpoint.\n");
+
+    // Initialize the messaging channel for the process
+    debug_printf("Allocating receive slot for the LMP channel...\n");
+    err = lmp_chan_alloc_recv_slot(rpc->channel);
+    if (err_is_fail(err)) {
+        debug_printf("Failed to allocate receive slot for LMP channel: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
+        return err;
+    }
+    debug_printf("Successfully allocated receive slot for LMP channel.\n");
+
+    // Register the handler for receiving messages
+    debug_printf("Registering the receive handler for the LMP channel...\n");
+    err = lmp_chan_register_recv(rpc->channel, ws, MKCLOSURE((void *) handler, (void *) rpc));
+    if (err_is_fail(err)) {
+        debug_printf("Failed to register receive handler: %s\n", err_getstring(err));
+        free(rpc);  // Clean up allocated memory on failure
+        return err;
+    }
+    debug_printf("Successfully registered the receive handler for the LMP channel.\n");
+
+    debug_printf("Exiting spawn_setup_ipc successfully.\n");
+    return SYS_ERR_OK;
 }
+
 
 
 /**

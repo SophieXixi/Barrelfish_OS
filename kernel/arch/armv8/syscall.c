@@ -1208,6 +1208,7 @@ handle_invoke(union syscall_info si, uint64_t a1, uint64_t a2, uint64_t a3,
     {
         struct dcb *listener = to->u.endpointlmp.listener;
         assert(listener != NULL);
+            printf("Before checking for target dispatcher\n");
 
         if (listener->disp) {
             uint8_t length_words = si.invoke.msg_words;
@@ -1278,6 +1279,8 @@ handle_invoke(union syscall_info si, uint64_t a1, uint64_t a2, uint64_t a3,
             }
         }
         else {
+                        printf("target dispatcher is wrong\n");
+
             r.error = SYS_ERR_LMP_NO_TARGET;
         }
     }

@@ -266,9 +266,7 @@ static inline errval_t invoke_cap_identify(struct capref cap,
     // Check and print result of the invocation
     if (err_is_fail(err)) {
         printf("cap_invoke4 failed with error: %s\n", err_getstring(err));
-    } else {
-        printf("Capability identification successful.\n");
-    }
+    } 
 
     return err;
 }

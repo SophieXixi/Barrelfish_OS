@@ -223,7 +223,7 @@ static void test_suspend_and_resume(void)
 static void test_killing_process(void)
 {
     errval_t err;
-
+    
     // the core we want to spawn on, our own.
     coreid_t core = disp_get_core_id();
 
@@ -280,20 +280,23 @@ errval_t grading_run_tests_processes(void)
     grading_printf("#################################################\n");
     grading_printf("# TESTS: Milestone 3 (Process Management)        \n");
     grading_printf("#################################################\n");
-
+    
+    spawn_one_with_default_args();
     spawn_one_without_args();
     spawn_one_with_default_args();
     spawn_one_with_args();
     spawn_list();
     spawn_one_with_caps();
-    test_suspend_and_resume();
-    test_killing_process();
 
 
 
     grading_printf("#################################################\n");
     grading_printf("# DONE:  Milestone 3 (Process Management)        \n");
     grading_printf("#################################################\n");
+
+    test_suspend_and_resume();
+    test_killing_process();
+
 
     grading_stop();
 

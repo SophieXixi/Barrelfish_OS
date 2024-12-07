@@ -449,7 +449,7 @@ enum kernel_cmd {
     KernelCmd_ReclaimRAM,         ///< Retrieve stored ram caps from KCB
     KernelCmd_Count
 };
-
+// hello
 /**
  * Specific commands for dispatcher capabilities.
  */

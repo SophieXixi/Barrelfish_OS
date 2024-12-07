@@ -25,6 +25,9 @@
 #include <aos/paging.h>
 #include <aos/systime.h>
 #include <barrelfish_kpi/domain_params.h>
+#include <aos/aos_rpc.h>
+#include <proc_mgmt/proc_mgmt.h>
+
 
 #include "threads_priv.h"
 #include "init.h"
@@ -43,6 +46,8 @@ __weak_reference(libc_exit, _exit);
 void libc_exit(int status)
 {
     debug_printf("libc exit NYI!\n");
+    //proc_mgmt_exit(status);
+    aos_rpc_proc_exit(aos_rpc_get_process_channel(), status);
     thread_exit(status);
     // If we're not dead by now, we wait
     while (1) {}
@@ -132,6 +137,7 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     if (err_is_fail(err)) {
         return err_push(err, LIB_ERR_RAM_ALLOC_INIT);
     }
+    ram_alloc_set(NULL);
 
     err = paging_init();
     if (err_is_fail(err)) {
@@ -144,23 +150,46 @@ errval_t barrelfish_init_onthread(struct spawn_domain_params *params)
     }
 
 
-
+    // TODO MILESTONE 4: register ourselves with init
     lmp_endpoint_init();
 
     // HINT: Use init_domain to check if we are the init domain.
+    // If alredy in the init domain. No need to register itself with the system
+    // Check if already in the init domain
+    if (init_domain) {
+        debug_printf("This is the init domain\n");
+        return SYS_ERR_OK;
+    }
 
-    // TODO MILESTONE 4: register ourselves with init
-    /* allocate lmp channel structure */
-    /* create local endpoint */
-    /* set remote endpoint to init's endpoint */
-    /* set receive handler */
-    /* send local ep to init */
-    /* wait for init to acknowledge receiving the endpoint */
     /* initialize init RPC client with lmp channel */
-    /* set init RPC client in our program state */
+    struct aos_rpc *init_rpc = aos_rpc_get_init_channel();
 
-    /* TODO MILESTONE 4: now we should have a channel with init set up and can
-     * use it for the ram allocator */
+    // /* set receive handler */
+    err = lmp_chan_alloc_recv_slot(init_rpc->channel);
+    if (err_is_fail(err)) {
+        debug_printf("could not allocate receive slot for LMP Channel\n");
+    }   
+
+    debug_printf("print remote\n");
+    debug_print_cap_at_capref(init_rpc->channel->remote_cap);
+
+    debug_printf("print local\n");
+    debug_print_cap_at_capref(init_rpc->channel->local_cap);
+
+    // /* send local ep to init */
+    err = lmp_chan_register_send(init_rpc->channel, get_default_waitset(), MKCLOSURE(initialize_send_handler, (void *) init_rpc));
+    if (err_is_fail(err)) {
+        debug_printf("could not register send in child\n");
+    }   
+
+    
+    err = event_dispatch(get_default_waitset());
+    if (err_is_fail(err)) {
+        debug_printf("could not dispatch event in child\n");
+    }  
+
+    /* set init RPC client in our program state */
+    set_init_rpc(init_rpc);
 
     // right now we don't have the nameservice & don't need the terminal
     // and domain spanning, so we return here

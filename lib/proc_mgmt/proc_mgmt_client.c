@@ -50,7 +50,11 @@
 errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struct capref capv[],
                                    coreid_t core, domainid_t *pid)
 {
+    struct capref cnode_cap;
+    (void)capv;
     errval_t err;
+    (void)err;
+
 
     if (capc != 0) {
         USER_PANIC("handling of cap sending is not yet implemented!")
@@ -119,6 +123,8 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
  */
 errval_t proc_mgmt_ps(struct proc_status **ps, size_t *num)
 {
+    (void)num;
+    (void)ps;
     // TODO:
     // - obtain the status of the processes running in the system
     USER_PANIC("not implemented");

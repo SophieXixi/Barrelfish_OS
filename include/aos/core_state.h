@@ -27,10 +27,19 @@
 #include <barrelfish_kpi/capabilities.h>
 #include <barrelfish_kpi/init.h> // for CNODE_SLOTS_*
 
+#define NUM_MEM_BLOCKS_ALLOC 20
+
 struct allocated_region {
     void *base;               // Starting address of the allocated region
     size_t size;              // Size of the allocated region
     struct allocated_region *next;
+};
+
+
+struct allocdBlock {
+    lvaddr_t vaddr;
+    size_t bytes;
+    struct allocdBlock * next;
 };
 
 struct morecore_state {
@@ -45,8 +54,8 @@ struct morecore_state {
     struct allocated_region *allocated_list;
     size_t alignment;
     struct slab_allocator slab_allocator;
-
-
+    struct allocdBlock * root;
+    char slab_buf[SLAB_STATIC_SIZE(NUM_MEM_BLOCKS_ALLOC, sizeof(struct allocdBlock))];
     // Original
     char *freep;
 };

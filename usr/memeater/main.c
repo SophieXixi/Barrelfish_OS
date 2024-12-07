@@ -31,7 +31,11 @@ const char *str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, "
                   "occaecat cupidatat non proident, sunt in culpa qui officia "
                   "deserunt mollit anim id est laborum.";
 
-static errval_t request_and_map_memory(void)
+static errval_t \
+
+
+
+request_and_map_memory(void)
 {
     errval_t err;
 

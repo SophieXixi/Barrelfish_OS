@@ -26,15 +26,14 @@
 #include <spawn/argv.h>
 
 #include "proc_mgmt.h"
-
+#include <proc_mgmt/proc_mgmt.h>
 
 extern struct bootinfo *bi;
 extern coreid_t         my_core_id;
 struct process_manager *proc_manager;
+struct spawninfo* root = NULL;
 
-
-
-
+static errval_t parse_args(const char *cmdline, int *argc, char *argv[]);
 
 /*
  * ------------------------------------------------------------------------------------------------
@@ -177,8 +176,12 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
 
     pro_node->si->binary_name = malloc(strlen((char*)argv[0]) + 1);
     pro_node->name = malloc(strlen((char*)argv[0]) + 1);
+    printf("after malloc%u\n", *pid);
+
 
     strcpy(pro_node->si->binary_name, (char*) argv[0]);
+        printf("after strcpy%u\n", *pid);
+
 
     
     struct mem_region* module = multiboot_find_module(bi, argv[0]);
@@ -209,6 +212,7 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     pro_node->si->child_frame_id = child_frame_id;
     pro_node->si->mapped_elf = mapped_elf;
     pro_node->si->pid = *pid;
+    pro_node->si->nextSpawn = root;
 
     struct elfimg img;
     elfimg_init_from_module(&img, module);
@@ -223,8 +227,6 @@ errval_t proc_mgmt_spawn_with_caps(int argc, const char *argv[], int capc, struc
     if (err_is_fail(err)) {
         USER_PANIC("spawn_load_with_caps err in spawn_start: %s\n", err_getstring(err));
     }
-
-    
 
     return SYS_ERR_OK;
 
@@ -257,62 +259,90 @@ domainid_t allocate_pid(struct process_manager *manager) {
  * Note: this function should replace the default commandline arguments the program.
  */
 errval_t proc_mgmt_spawn_with_cmdline(const char *cmdline, coreid_t core, domainid_t *pid) {
-    (void)core;
+    // Ensure valid parameters
+    // Handle multicore spawning
+    //my_core_id = disp_get_core_id();
+    if (core != my_core_id) {
+        debug_printf("Spawning on core %d from core %d\n", core, my_core_id);
 
-    // Initialize `spawninfo` structure
-    //struct spawninfo si;
-    printf("si initialized");
+        // Select appropriate UMP channel for inter-core communication
+        /**
+         *  get_channel_for_core_to_monitor(core, 1) gets the monitor-to-core channel (used by the BSP).
+            get_channel_for_current_core(0) gets the current-core-to-monitor channel (used by application cores).
+         */
+        //struct ump_chan *uchan = (my_core_id == 0) ? get_channel_for_core_to_monitor(core, 1) : get_channel_for_current_core(0);
 
+        struct ump_chan *uchan = (my_core_id == 0) ? get_channel_for_core_to_monitor(core, 1) : get_channel_for_current_core(0);
 
-    // Call spawn_load_with_bootinfo to load the process
-    printf("Calling spawn_load_with_bootinfo for PID %u\n", *pid);
-    // si.core_id = my_core_id;
-    initialize_process_manager(&proc_manager);
-    *pid =  allocate_pid(proc_manager);
-    struct process_node *pro_node=  allocate_process_node(proc_manager);
-    printf("successful allocate pro_node\n");
-    pro_node->processes->core = core;
-    pro_node->processes->pid = *pid;
-    pro_node->processes->state = PROC_STATE_SPAWNING;
-    pro_node->processes->exit_code = 0;
-    pro_node->name = cmdline;
+        // Construct UMP payload message
+        struct ump_payload msg;
+        msg.type = SPAWN_CMDLINE;
+        msg.core = core;
 
-    
-    printf("allocate new PID in spawn with cmdline%u\n", *pid);
-    errval_t err = spawn_load_with_bootinfo(pro_node->si, bi, cmdline,*pid);
-    if (err_is_fail(err)) {
-        debug_printf("Error loading process: %s\n", err_getstring(err));
-        return err;
+        // Safely copy command line into the payload (respecting payload size limits)
+        strncpy(msg.payload, cmdline, sizeof(msg.payload));
+        msg.payload[sizeof(msg.payload) - 1] = '\0';  // Ensure null-termination
+
+        // Send the message
+        errval_t err = ump_send(uchan, (char *)&msg, sizeof(struct ump_payload));
+        if (err_is_fail(err)) {
+            debug_printf("Failed to send UMP message: %s\n", err_getstring(err));
+            return err;
+        }
+
+        // TODO: Block and wait for acknowledgment from the other core (e.g., using UMP receive)
+
+        return SYS_ERR_OK;
     }
-    printf("Process loaded successfully for PID %u\n", *pid);
-    si.state = SPAWN_STATE_READY;
+    debug_printf("spawning the processses on this core: %d\n", disp_get_core_id());
 
-    err = spawn_start(&si);
+    printf("reach before args\n");
+    // Parse the command line into arguments
+    const char *argv[MAX_CMDLINE_ARGS];
+    argv[0] = cmdline;
+    int argc = 0;
+    printf("reach before parse args\n");
 
-    pro_node->si->state = SPAWN_STATE_READY;
-    err = spawn_start(pro_node->si);
-    if (err_is_fail(err)) {
-        debug_printf("Error Starting process: %s\n", err_getstring(err));
-        return err;
-    }
-    printf("Process running successfully for PID %u\n", *pid);
-
-    // Optional: Update proc_manager with the new process
-    // Ensure memory for `processes` array is allocated or reallocated
-    // and add `&si` to `proc_manager->processes`
-
-    //  - find the image
-    //  - allocate a PID
-    //  - use the spawn library to construct a new process
-    //  - start the new process
-    //  - keep track of the spawned process
+    parse_args(cmdline, &argc, (char **)argv);
+    printf("reach after parse args\n");
 
 
+    // Spawn the process with parsed arguments
+    return proc_mgmt_spawn_with_caps(argc, argv, 0, NULL, core, pid);
     return SYS_ERR_OK;
 }
 
 
+/**
+ * @brief Splits a command line string into an array of arguments.
+ *
+ * @param[in]  cmdline  The command line string to parse.
+ * @param[out] argc     The number of arguments parsed.
+ * @param[out] argv     The array of argument strings.
+ */
+static errval_t parse_args(const char *cmdline, int *argc, char *argv[])
+{
+    // check if we have at least one argument
+    if (argv == NULL || argv[0] == NULL || argc == NULL || cmdline == NULL) {
+        return CAPS_ERR_INVALID_ARGS;
+    }
 
+    // parse cmdline, split on spaces
+    char cmdline_ptr[MAX_CMDLINE_ARGS + 1];
+    strncpy(cmdline_ptr, cmdline, strlen(cmdline) + 1);
+    char *token = strtok(cmdline_ptr, " ");
+    int i = 0;
+    *argc = 0;
+
+    while (token != NULL && i < MAX_CMDLINE_ARGS) {
+        argv[i++] = token;
+        (*argc)++;
+        token = strtok(NULL, " ");
+    }
+    argv[i] = NULL;
+
+    return SYS_ERR_OK;
+}
 
 /**
  * @brief spawns a new process with the default arguments on the given core
@@ -357,7 +387,6 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
     }
     printf("Process loaded successfully for PID %u\n", *pid);
     
-
     pro_node->si->state = SPAWN_STATE_READY;
     err = spawn_start(pro_node->si);
     if (err_is_fail(err)) {
@@ -365,17 +394,6 @@ errval_t proc_mgmt_spawn_program(const char *path, coreid_t core, domainid_t *pi
         return err;
     }
     printf("Process running successfully for PID %u\n", *pid);
-
-
-    // Optional: Update proc_manager with the new process
-    // Ensure memory for `processes` array is allocated or reallocated
-    // and add `&si` to `proc_manager->processes`
-
-    //  - find the image
-    //  - allocate a PID
-    //  - use the spawn library to construct a new process
-    //  - start the new process
-    //  - keep track of the spawned process
 
 
     return SYS_ERR_OK;
@@ -752,13 +770,32 @@ errval_t proc_mgmt_terminated(domainid_t pid, int status)
     (void)pid;
     (void)status;
 
-    USER_PANIC("functionality not implemented\n");
+    //USER_PANIC("functionality not implemented\n");
     // TODO:
     //   - find the process with the given PID and trigger the exit procedure
     //   - remove the process from the process table
     //   - clean up the state of the process
     //   - for M4: notify waiting processes
-    return LIB_ERR_NOT_IMPLEMENTED;
+    debug_printf("enter proc_mgmt_terminated\n");
+    struct process_node * curr = proc_manager->head;
+    while (curr != NULL) {
+        if (curr->si->pid == pid) {
+            curr->si->exitcode = status;
+             errval_t err = proc_mgmt_kill(pid);
+            if(err_is_fail(err)) {
+                USER_PANIC("process is not successfully terminated\n");
+            }
+            curr->si->state = SPAWN_STATE_TERMINATED;
+           
+    
+            debug_printf("Process manager knows pid: %d, terminated\n");
+            return SYS_ERR_OK;
+        }
+        curr = curr->next;
+    }
+
+    return SPAWN_ERR_DOMAIN_NOTFOUND;
+    //return LIB_ERR_NOT_IMPLEMENTED;
 }
 
 
@@ -781,16 +818,16 @@ errval_t proc_mgmt_wait(domainid_t pid, int *status)
 }
 
 
-/**
- * @brief tells the process manager than the process with pid has terminated.
+ /**
+  * @brief registers a channel to be triggered when the process exits
  *
- * @param[in] pid     process identifier of the process to wait for
- * @param[in] status  integer value with the given status
- *
- * @return SYS_ERR_OK on success, SPAWN_ERR_* on failure
- *
- * Note: this means the process has exited gracefully
- */
+ * @param[in] pid   the PID of the process to register a trigger for
+ * @param[in] t     channel type
+ * @param[in] chan  channel to be triggered
+ * @param[in] ws    the waitset to be used for the channel
+ * 
+ * @return SYS_ERR_OK on sucess, SPANW_ERR_* on failure
+ */ 
 errval_t proc_mgmt_register_wait(domainid_t pid, enum aos_rpc_transport t, void *chan,
                                  struct waitset *ws)
 {
@@ -821,6 +858,7 @@ errval_t proc_mgmt_kill(domainid_t pid)
     while (current != NULL) {
         if (current->si->pid == pid) {
             // Attempt to kill the process
+            
             errval_t err = spawn_kill(current->si);
             if (err_is_fail(err)) {
                 USER_PANIC("Failed to kill process with PID %d: %s\n", pid, err_getstring(err));

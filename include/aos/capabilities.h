@@ -382,7 +382,7 @@ static inline errval_t vnode_map(struct capref dest, struct capref src, capaddr_
     printf("Mapping cap: root=0x%lx, addr=0x%lx, level=%d\n", mcn_root, mcn_addr, mcn_level);
 
 
-    printf("ready to call invoke_vnoce_map\n");
+    //printf("ready to call invoke_vnoce_map\n");
     return invoke_vnode_map(dest, slot, sroot, saddr, slevel, attr, off, pte_count, mcn_root,
                             mcn_addr, mcn_level, mapping.slot);
     printf("falied to call invoke_vnode_map\n");
